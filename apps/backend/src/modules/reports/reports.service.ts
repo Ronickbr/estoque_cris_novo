@@ -31,6 +31,111 @@ export class ReportsService {
     private inventoryMovementsService: InventoryMovementsService
   ) {}
 
+  async getDashboardStats(): Promise<any> {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const salesSums = await this.movementRepository
+      .createQueryBuilder('m')
+      .select([
+        `COALESCE(SUM(CASE WHEN m.type = 'saida' AND m.createdAt >= :today THEN m.quantity ELSE 0 END), 0) as vendas_hoje`,
+        `COALESCE(SUM(CASE WHEN m.type = 'saida' AND m.createdAt >= :weekAgo THEN m.quantity ELSE 0 END), 0) as vendas_semana`,
+        `COALESCE(SUM(CASE WHEN m.type = 'saida' AND m.createdAt >= :monthAgo THEN m.quantity ELSE 0 END), 0) as vendas_mes`,
+      ])
+      .setParameters({ today, weekAgo, monthAgo })
+      .getRawOne();
+
+    const vendasHoje = parseInt(salesSums?.vendas_hoje || '0', 10);
+    const vendasSemana = parseInt(salesSums?.vendas_semana || '0', 10);
+    const vendasMes = parseInt(salesSums?.vendas_mes || '0', 10);
+
+    const bestDay = await this.movementRepository
+      .createQueryBuilder('m')
+      .select([
+        `TO_CHAR(m.createdAt, 'YYYY-MM-DD') as date`,
+        `SUM(m.quantity) as total`,
+      ])
+      .where("m.type = 'saida' AND m.createdAt >= :monthAgo", { monthAgo })
+      .groupBy(`TO_CHAR(m.createdAt, 'YYYY-MM-DD')`)
+      .orderBy('total', 'DESC')
+      .limit(1)
+      .getRawOne();
+
+    const diaMaisVendas = bestDay
+      ? { date: bestDay.date, total: parseInt(bestDay.total || '0', 10) }
+      : null;
+
+    const getTopProducts = async (since: Date) => {
+      const rows = await this.movementRepository
+        .createQueryBuilder('m')
+        .innerJoin('m.product', 'p')
+        .select([
+          'p.id as id',
+          'p.name as name',
+          'SUM(m.quantity) as total',
+        ])
+        .where("m.type = 'saida' AND m.createdAt >= :since", { since })
+        .groupBy('p.id, p.name')
+        .orderBy('total', 'DESC')
+        .limit(5)
+        .getRawMany();
+
+      return rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        total: parseInt(r.total || '0', 10),
+        revenue: 0,
+      }));
+    };
+
+    const [produtosHoje, produtosSemana, produtosMes] = await Promise.all([
+      getTopProducts(today),
+      getTopProducts(weekAgo),
+      getTopProducts(monthAgo),
+    ]);
+
+    const lowStockProducts = await this.productRepository
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.manufacturer', 'm')
+      .where('p.stock <= COALESCE(p.minStock, 5)')
+      .orderBy('m.name', 'ASC')
+      .addOrderBy('p.stock', 'ASC')
+      .getMany();
+
+    const manufacturerMap = new Map<string, any>();
+    for (const p of lowStockProducts) {
+      const mId = p.manufacturer?.id || p.manufacturerId || 'sem-fabricante';
+      if (!manufacturerMap.has(mId)) {
+        manufacturerMap.set(mId, {
+          manufacturer: p.manufacturer || { id: mId, name: 'Sem Fabricante' },
+          products: [],
+        });
+      }
+      manufacturerMap.get(mId).products.push({
+        id: p.id,
+        name: p.name,
+        stock: p.stock,
+        minStock: p.minStock,
+        manufacturerName: p.manufacturer?.name || '',
+      });
+    }
+
+    const estoqueBaixo = Array.from(manufacturerMap.values());
+
+    return {
+      vendasHoje,
+      vendasSemana,
+      vendasMes,
+      diaMaisVendas,
+      produtosHoje,
+      produtosSemana,
+      produtosMes,
+      estoqueBaixo,
+    };
+  }
+
   async generateReport(query: ReportQueryDto): Promise<any> {
     switch (query.type) {
       case ReportType.STOCK_BY_MANUFACTURER:

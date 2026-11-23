@@ -16,6 +16,13 @@ import { UserRole } from '@/modules/users/entities/user.entity';
 export class ReportsController {
   constructor(private reportsService: ReportsService) {}
 
+  @Get('dashboard')
+  @ApiOperation({ summary: 'Estatísticas do dashboard' })
+  @ApiResponse({ status: 200, description: 'Dados do dashboard' })
+  async getDashboardStats(): Promise<any> {
+    return this.reportsService.getDashboardStats();
+  }
+
   @Get()
   @ApiOperation({ summary: 'Gerar relatório' })
   @ApiResponse({ status: 200, description: 'Dados do relatório' })

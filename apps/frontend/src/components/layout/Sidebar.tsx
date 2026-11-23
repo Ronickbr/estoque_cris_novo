@@ -1,9 +1,10 @@
-import { Navbar, NavDropdown, Button } from 'react-bootstrap';
+import { OverlayTrigger, Tooltip } from 'react-bootstrap';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '@hooks/useAuth';
 import { cn, getInitials } from '@utils';
 import { UserRole } from '@types';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId } from 'react';
+import './Sidebar.css';
 import {
   House,
   Box,
@@ -13,193 +14,335 @@ import {
   User,
   List,
   X,
-  Leaf,
   LogOut,
   Settings as SettingsIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Layers,
+  Sparkles,
 } from 'lucide-react';
 
-const NAV_ITEMS = [
-  { path: '/dashboard', icon: House, label: 'Dashboard', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER] },
-  { path: '/products', icon: Box, label: 'Produtos', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER] },
-  { path: '/manufacturers', icon: Building, label: 'Fabricantes', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER] },
-  { path: '/reports', icon: FileBarChart, label: 'Relatórios', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR] },
-  { path: '/inventory', icon: List, label: 'Movimentações', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR] },
-  { path: '/backup', icon: Database, label: 'Backup', roles: [UserRole.ADMIN] },
-  { path: '/profile', icon: User, label: 'Perfil', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER] },
-  { path: '/settings', icon: SettingsIcon, label: 'Configurações', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER] },
+interface NavSection {
+  title: string;
+  items: {
+    path: string;
+    icon: typeof House;
+    label: string;
+    roles: UserRole[];
+    badge?: string;
+  }[];
+}
+
+const NAV_SECTIONS: NavSection[] = [
+  {
+    title: 'Principal',
+    items: [
+      {
+        path: '/dashboard',
+        icon: House,
+        label: 'Dashboard',
+        roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER],
+      },
+    ],
+  },
+  {
+    title: 'Gestão',
+    items: [
+      {
+        path: '/products',
+        icon: Box,
+        label: 'Produtos',
+        roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER],
+      },
+      {
+        path: '/manufacturers',
+        icon: Building,
+        label: 'Fabricantes',
+        roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER],
+      },
+      {
+        path: '/inventory',
+        icon: List,
+        label: 'Movimentações',
+        roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR],
+      },
+      {
+        path: '/reports',
+        icon: FileBarChart,
+        label: 'Relatórios',
+        roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR],
+      },
+    ],
+  },
+  {
+    title: 'Sistema',
+    items: [
+      {
+        path: '/backup',
+        icon: Database,
+        label: 'Backup',
+        roles: [UserRole.ADMIN],
+      },
+      {
+        path: '/profile',
+        icon: User,
+        label: 'Perfil',
+        roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER],
+      },
+      {
+        path: '/settings',
+        icon: SettingsIcon,
+        label: 'Configurações',
+        roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER],
+      },
+    ],
+  },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
+}
+
+export function Sidebar({ isCollapsed = false, onToggleCollapse }: SidebarProps) {
   const { user, logout } = useAuth();
   const location = useLocation();
-  const [isOpen, setIsOpen] = useState(false);
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const tooltipPrefixId = useId();
 
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-      if (!isMobile) {
-        setIsOpen(false);
+    const handleResize = () => {
+      const mobile = window.innerWidth < 992;
+      setIsMobile(mobile);
+      if (!mobile) {
+        setIsMobileOpen(false);
       }
     };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, [isMobile]);
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
-  const filteredItems = NAV_ITEMS.filter((item) => 
-    user ? item.roles.includes(user.nivel) : false
-  );
+  const closeMobile = () => setIsMobileOpen(false);
+  const toggleMobile = () => setIsMobileOpen(!isMobileOpen);
 
-  const toggleSidebar = () => setIsOpen(!isOpen);
-  const closeSidebar = () => setIsOpen(false);
+  let globalSiblingCounter = 0;
 
   return (
     <>
-      <Navbar
-        id="navbar-mobile"
-        className={cn('navbar-mobile', 'd-lg-none', 'fixed-top', 'bg-white', 'border-bottom', 'shadow-sm', 'z-1030')}
-        expand="lg"
-        role="navigation"
-        aria-label="Navegação mobile"
+      {/* Mobile Top Header */}
+      <header
+        className="navbar-mobile d-lg-none fixed-top d-flex align-items-center justify-content-between px-3 z-1030 shadow-sm"
+        role="banner"
       >
-        <div className="container-fluid px-3">
-          <NavLink to="/dashboard" className="navbar-mobile__brand d-flex align-items-center gap-2 text-decoration-none text-dark fw-bold fs-5">
-            <Leaf className="text-primary" size={24} aria-hidden="true" />
-            <span>Sistema de Estoque</span>
-          </NavLink>
-          <Button
-            id="sidebar-toggler"
-            className="navbar-mobile__toggler"
-            variant="ghost"
-            size="sm"
-            onClick={toggleSidebar}
-            aria-label={isOpen ? 'Fechar menu' : 'Abrir menu'}
-            aria-expanded={isOpen}
-            aria-controls="sidebar"
-          >
-            {isOpen ? <X size={24} /> : <List size={24} />}
-          </Button>
-        </div>
-      </Navbar>
+        <NavLink to="/dashboard" className="navbar-mobile__brand d-flex align-items-center gap-2 text-decoration-none">
+          <div className="sidebar__logo-badge" style={{ width: '32px', height: '32px', minWidth: '32px' }}>
+            <Layers size={18} />
+          </div>
+          <span className="fw-bold fs-6 text-white">CrisEstoque</span>
+        </NavLink>
+        <button
+          type="button"
+          className="btn btn-sm text-white p-2 border-0 bg-transparent"
+          onClick={toggleMobile}
+          aria-label={isMobileOpen ? 'Fechar menu lateral' : 'Abrir menu lateral'}
+          aria-expanded={isMobileOpen}
+          aria-controls="app-sidebar"
+        >
+          {isMobileOpen ? <X size={24} /> : <List size={24} />}
+        </button>
+      </header>
 
+      {/* Mobile Backdrop Overlay */}
       <div
-        id="sidebar-overlay"
-        className={cn('sidebar-overlay', 'fixed', 'inset-0', 'bg-dark', 'bg-opacity-50', 'z-1035', 'd-lg-none', isOpen && 'sidebar-overlay--show')}
-        onClick={closeSidebar}
+        className={cn('sidebar-overlay d-lg-none', isMobileOpen && 'sidebar-overlay--show')}
+        onClick={closeMobile}
         aria-hidden="true"
       />
 
+      {/* Lateral Sidebar Navigation */}
       <aside
-        id="sidebar"
+        id="app-sidebar"
         className={cn(
           'sidebar',
-          'fixed',
-          'top-0',
-          'start-0',
-          'h-100',
-          'bg-white',
-          'border-end',
-          'shadow-sm',
-          'z-1040',
-          'transition-all',
-          'duration-250',
-          'd-flex',
-          'flex-column',
-          isMobile ? 'sidebar--mobile' : '',
-          isOpen && isMobile && 'sidebar--open',
-          !isMobile && 'sidebar--desktop'
+          isCollapsed && !isMobile && 'sidebar--collapsed',
+          isMobile && isMobileOpen && 'sidebar--mobile-open'
         )}
         role="navigation"
-        aria-label="Navegação principal"
-        style={{ width: 'var(--sidebar-width)' }}
+        aria-label="Menu principal"
       >
-        <div className="sidebar__logo d-flex align-items-center gap-2 px-3 py-3 border-bottom">
-          <Leaf className="text-primary" size={28} aria-hidden="true" />
-          <span className="sidebar__logo-text fw-bold fs-5 d-none d-md-block">Sistema de Estoque</span>
+        {/* Brand Header */}
+        <div className="sidebar__header">
+          <NavLink to="/dashboard" className="sidebar__brand" onClick={closeMobile}>
+            <div className="sidebar__logo-badge" aria-hidden="true">
+              <Layers size={20} />
+            </div>
+            <div className="sidebar__brand-text">
+              <span className="sidebar__brand-title d-flex align-items-center gap-1.5">
+                CrisEstoque
+                <Sparkles size={13} className="text-primary" />
+              </span>
+              <span className="sidebar__brand-subtitle">Gestão Inteligente</span>
+            </div>
+          </NavLink>
+
+          {/* Desktop Collapse Toggle Button */}
+          {onToggleCollapse && !isMobile && (
+            <button
+              type="button"
+              className="sidebar__toggle-btn d-none d-lg-flex"
+              onClick={onToggleCollapse}
+              aria-label={isCollapsed ? 'Expandir barra lateral' : 'Recolher barra lateral'}
+              title={isCollapsed ? 'Expandir barra lateral' : 'Recolher barra lateral'}
+            >
+              {isCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            </button>
+          )}
+
+          {/* Mobile Close Button */}
+          {isMobile && (
+            <button
+              type="button"
+              className="sidebar__toggle-btn d-lg-none text-white"
+              onClick={closeMobile}
+              aria-label="Fechar menu lateral"
+            >
+              <X size={20} />
+            </button>
+          )}
         </div>
 
-        <nav className="sidebar__nav flex-1 overflow-auto px-2 py-3">
-          <ul className="sidebar__list list-unstyled" role="list">
-            {filteredItems.map((item) => (
-              <li key={item.path} className="sidebar__item">
-                <NavLink
-                  to={item.path}
-                  className={cn(
-                    'sidebar__link',
-                    'd-flex',
-                    'align-items-center',
-                    'gap-3',
-                    'px-3',
-                    'py-2.5',
-                    'rounded-3',
-                    'text-decoration-none',
-                    'text-dark',
-                    'fw-medium',
-                    'transition-all',
-                    'duration-150',
-                    location.pathname === item.path || 
-                    (item.path !== '/dashboard' && location.pathname.startsWith(item.path))
-                      ? 'sidebar__link--active bg-primary-100 text-primary'
-                      : 'hover:bg-light'
-                  )}
-                  aria-current={location.pathname === item.path ? 'page' : undefined}
-                  onClick={closeSidebar}
-                >
-                  <item.icon className="sidebar__icon" size={20} aria-hidden="true" />
-                  <span className="sidebar__label d-none d-md-inline">{item.label}</span>
-                </NavLink>
-              </li>
-            ))}
-          </ul>
+        {/* Navigation Sections */}
+        <nav className="sidebar__nav" role="navigation" aria-label="Navegação do sistema">
+          {NAV_SECTIONS.map((section, sIndex) => {
+            const visibleItems = section.items.filter((item) =>
+              user ? item.roles.includes(user.nivel) : false
+            );
+
+            if (visibleItems.length === 0) return null;
+
+            return (
+              <div key={section.title} className="sidebar__section">
+                {!isCollapsed && (
+                  <div className="sidebar__section-title">{section.title}</div>
+                )}
+                {isCollapsed && sIndex > 0 && <div className="sidebar__section-divider" />}
+
+                <ul className="list-unstyled mb-0" role="list">
+                  {visibleItems.map((item) => {
+                    globalSiblingCounter += 1;
+                    const siblingIdx = globalSiblingCounter;
+                    const isActive =
+                      location.pathname === item.path ||
+                      (item.path !== '/dashboard' && location.pathname.startsWith(item.path));
+
+                    const linkContent = (
+                      <NavLink
+                        to={item.path}
+                        className={cn('sidebar__link', isActive && 'sidebar__link--active')}
+                        onClick={closeMobile}
+                        aria-current={isActive ? 'page' : undefined}
+                      >
+                        <item.icon className="sidebar__icon" aria-hidden="true" />
+                        <span className="sidebar__label">{item.label}</span>
+                        {isActive && !isCollapsed && <span className="sidebar__active-pip" aria-hidden="true" />}
+                      </NavLink>
+                    );
+
+                    return (
+                      <li
+                        key={item.path}
+                        className="sidebar__item"
+                        style={{ '--sibling-index': siblingIdx } as React.CSSProperties}
+                      >
+                        {isCollapsed && !isMobile ? (
+                          <OverlayTrigger
+                            placement="right"
+                            delay={{ show: 150, hide: 100 }}
+                            overlay={
+                              <Tooltip id={`${tooltipPrefixId}-${item.path.replace('/', '')}`}>
+                                {item.label}
+                              </Tooltip>
+                            }
+                          >
+                            <div>{linkContent}</div>
+                          </OverlayTrigger>
+                        ) : (
+                          linkContent
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
         </nav>
 
-        <div className="sidebar__user-section p-3 border-top">
+        {/* User Profile Footer */}
+        <div className="sidebar__footer">
           {user && (
-            <NavDropdown
-              title={
-                <>
-                  <div className="d-flex align-items-center gap-2">
-                    <div
-                      className="avatar rounded-circle bg-primary d-flex align-items-center justify-content-center"
-                      style={{ width: '32px', height: '32px', fontSize: '12px', fontWeight: 600, color: 'white' }}
-                    >
-                      {getInitials(user.nome)}
-                    </div>
-                    <div className="d-flex flex-column">
-                      <span className="fw-medium text-truncate" style={{ maxWidth: '160px' }}>{user.nome}</span>
-                      <small className="text-muted text-capitalize">{getUserRoleLabel(user.nivel)}</small>
-                    </div>
+            <div className="sidebar__user-card">
+              {isCollapsed && !isMobile ? (
+                <OverlayTrigger
+                  placement="right"
+                  delay={{ show: 150, hide: 100 }}
+                  overlay={
+                    <Tooltip id={`${tooltipPrefixId}-user-card`}>
+                      {user.nome} ({getUserRoleLabel(user.nivel)})
+                    </Tooltip>
+                  }
+                >
+                  <div className="sidebar__avatar-wrap">
+                    <div className="sidebar__avatar">{getInitials(user.nome)}</div>
+                    <span className="sidebar__status-dot" aria-label="Online" />
                   </div>
-                </>
-              }
-              id="user-dropdown"
-              className="w-100"
-              align="end"
-            >
-              <NavDropdown.Item as={NavLink} to="/profile" onClick={closeSidebar}>
-                <User className="me-2" size={16} aria-hidden="true" />
-                Meu Perfil
-              </NavDropdown.Item>
-              <NavDropdown.Item as={NavLink} to="/settings" onClick={closeSidebar}>
-                <SettingsIcon className="me-2" size={16} aria-hidden="true" />
-                Configurações
-              </NavDropdown.Item>
-              <NavDropdown.Divider />
-              <NavDropdown.Item
-                onClick={async () => {
-                  await logout();
-                  closeSidebar();
-                }}
-              >
-                <LogOut className="me-2" size={16} aria-hidden="true" />
-                Sair
-              </NavDropdown.Item>
-            </NavDropdown>
+                </OverlayTrigger>
+              ) : (
+                <div className="sidebar__avatar-wrap">
+                  <div className="sidebar__avatar">{getInitials(user.nome)}</div>
+                  <span className="sidebar__status-dot" aria-label="Online" />
+                </div>
+              )}
+
+              <div className="sidebar__user-info">
+                <span className="sidebar__user-name" title={user.nome}>
+                  {user.nome}
+                </span>
+                <span className="sidebar__user-role">{getUserRoleLabel(user.nivel)}</span>
+              </div>
+
+              <div className="sidebar__user-actions">
+                <NavLink
+                  to="/settings"
+                  className="sidebar__action-btn"
+                  title="Configurações"
+                  aria-label="Configurações"
+                  onClick={closeMobile}
+                >
+                  <SettingsIcon size={15} />
+                </NavLink>
+
+                <button
+                  type="button"
+                  className="sidebar__action-btn sidebar__action-btn--logout"
+                  title="Encerrar sessão"
+                  aria-label="Encerrar sessão"
+                  onClick={async () => {
+                    await logout();
+                    closeMobile();
+                  }}
+                >
+                  <LogOut size={15} />
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </aside>
 
+      {/* Accessible skip link */}
       <a href="#main-content" className="skip-link">
         Pular para o conteúdo principal
       </a>
@@ -212,6 +355,7 @@ function getUserRoleLabel(role: string): string {
     admin: 'Administrador',
     operator: 'Operador',
     viewer: 'Visualizador',
+    user: 'Usuário',
   };
   return labels[role] || role;
 }

@@ -58,3 +58,17 @@ export function useExportStockReport() {
     mutationFn: (format: 'csv' | 'xlsx') => reportsService.exportStockReport(format),
   });
 }
+
+export function useInventoryReport() {
+  return useQuery({
+    queryKey: ['reports', 'inventory'],
+    queryFn: () => reportsService.getInventoryReport(),
+    staleTime: 1000 * 60 * 2,
+  });
+}
+
+export function useExportInventoryReport() {
+  return useMutation({
+    mutationFn: (format: 'csv' | 'xlsx') => reportsService.exportInventoryReport(format),
+  });
+}

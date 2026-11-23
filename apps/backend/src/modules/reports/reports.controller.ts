@@ -116,6 +116,21 @@ export class ReportsController {
     res.send(buffer);
   }
 
+  @Get('inventory')
+  @ApiOperation({ summary: 'Relatório de inventário físico e auditoria' })
+  async getInventoryReport() {
+    return this.reportsService.getInventoryReport();
+  }
+
+  @Get('inventory/export')
+  @ApiOperation({ summary: 'Exportar inventário' })
+  async exportInventory(@Query('format') format: string = 'csv', @Res() res: Response) {
+    const buffer = await this.reportsService.exportInventoryReport(format);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="inventario_${Date.now()}.${format}"`);
+    res.send(buffer);
+  }
+
   @Get()
   @ApiOperation({ summary: 'Gerar relatório' })
   @ApiResponse({ status: 200, description: 'Dados do relatório' })

@@ -68,6 +68,38 @@ const reportsService = {
     });
     return api.get(`/reports/movement-summary?${params.toString()}`);
   },
+
+  async getInventoryReport(): Promise<{
+    summary: {
+      totalProducts: number;
+      totalStockUnits: number;
+      totalValuation: number;
+      lowStockCount: number;
+      outOfStockCount: number;
+      accuracyPercentage: number;
+    };
+    items: Array<{
+      id: string;
+      name: string;
+      manufacturerId: string;
+      manufacturerName: string;
+      stock: number;
+      minStock: number;
+      estimatedUnitPrice: number;
+      totalValuation: number;
+      status: 'ok' | 'baixo' | 'zerado';
+      lastUpdated: string;
+    }>;
+  }> {
+    return api.get('/reports/inventory');
+  },
+
+  async exportInventoryReport(format: 'csv' | 'xlsx' = 'csv'): Promise<Blob> {
+    const response = await api.get(`/reports/inventory/export?format=${format}`, {
+      responseType: 'blob',
+    });
+    return response as unknown as Blob;
+  },
 };
 
 export default reportsService;

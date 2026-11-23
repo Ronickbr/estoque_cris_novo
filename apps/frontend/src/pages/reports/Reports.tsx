@@ -1,10 +1,39 @@
 import { Row, Col, Card, Button, Form, Modal, Badge, Spinner, DropdownButton, Dropdown, Table, Alert } from 'react-bootstrap';
-import { useState, useCallback } from 'react';
-import { useDashboardStats, useSalesReport, useStockReport, useInventoryValuation, useMovementSummary, useExportSalesReport, useExportStockReport } from '@hooks/useReports';
+import { useState, useCallback, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  useDashboardStats,
+  useSalesReport,
+  useStockReport,
+  useInventoryValuation,
+  useMovementSummary,
+  useExportSalesReport,
+  useExportStockReport,
+  useInventoryReport,
+  useExportInventoryReport,
+} from '@hooks/useReports';
+import inventoryService from '@services/inventory';
+import { MovementType } from '@types';
 import { useToastManager } from '@components/ui/Toast';
 import { cn, formatCurrency, formatNumber, formatDate } from '@utils';
 import {
-  FileBarChart, Calendar, Download, Upload, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Package, DollarSign, TrendingUp, AlertTriangle,
+  FileBarChart,
+  Calendar,
+  Download,
+  Upload,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUp,
+  ArrowDown,
+  Package,
+  DollarSign,
+  TrendingUp,
+  AlertTriangle,
+  CheckCircle2,
+  SlidersHorizontal,
+  Layers,
+  Search,
+  Plus,
 } from 'lucide-react';
 
 const REPORT_TYPES = [
@@ -91,7 +120,7 @@ export function Reports() {
       case 'valuation':
         return <ValuationTab report={valuationReport} loading={valuationQuery.isLoading} />;
       case 'inventory':
-        return <InventoryTab loading={false} />;
+        return <InventoryTab />;
       default:
         return <DashboardTab stats={stats} loading={statsLoading} />;
     }
@@ -459,13 +488,389 @@ function ValuationTab({ report, loading }: { report: any; loading: boolean }) {
   );
 }
 
-function InventoryTab({ loading }: { loading: boolean }) {
+function InventoryTab() {
+  const { data, isLoading, refetch } = useInventoryReport();
+  const exportMutation = useExportInventoryReport();
+  const queryClient = useQueryClient();
+  const { success, danger } = useToastManager();
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'baixo' | 'zerado'>('all');
+  const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [physicalCount, setPhysicalCount] = useState<number>(0);
+  const [adjustNotes, setAdjustNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const summary = data?.summary || {
+    totalProducts: 0,
+    totalStockUnits: 0,
+    totalValuation: 0,
+    lowStockCount: 0,
+    outOfStockCount: 0,
+    accuracyPercentage: 100,
+  };
+
+  const items = data?.items || [];
+
+  const filteredItems = useMemo(() => {
+    return items.filter((item: any) => {
+      const matchSearch =
+        (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (item.manufacturerName || '').toLowerCase().includes(searchTerm.toLowerCase());
+      const matchStatus = statusFilter === 'all' || item.status === statusFilter;
+      return matchSearch && matchStatus;
+    });
+  }, [items, searchTerm, statusFilter]);
+
+  const handleOpenAdjust = (product: any) => {
+    setSelectedProduct(product);
+    setPhysicalCount(product.stock);
+    setAdjustNotes(`Inventário físico auditado em ${new Date().toLocaleDateString('pt-BR')}`);
+    setShowAdjustModal(true);
+  };
+
+  const handleExportCSV = async () => {
+    try {
+      const blob = await exportMutation.mutateAsync('csv');
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `inventario_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      success('Exportação Concluída', 'Relatório de inventário baixado em CSV com sucesso');
+    } catch {
+      danger('Erro', 'Falha ao exportar relatório de inventário');
+    }
+  };
+
+  const handleConfirmAdjust = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProduct) return;
+
+    const diff = physicalCount - selectedProduct.stock;
+    if (diff === 0) {
+      success('Estoque Conferido', 'Nenhuma divergência encontrada. O estoque já está acurado.');
+      setShowAdjustModal(false);
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const movementType = diff > 0 ? MovementType.ENTRY : MovementType.EXIT;
+      const quantity = Math.abs(diff);
+
+      await inventoryService.createMovement({
+        productId: selectedProduct.id,
+        type: movementType,
+        quantity,
+        notes: adjustNotes || `Ajuste de inventário físico: ${diff > 0 ? 'sobra' : 'falta'} de ${quantity} un`,
+      });
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['reports'] }),
+        queryClient.invalidateQueries({ queryKey: ['products'] }),
+      ]);
+
+      success(
+        'Ajuste Registrado',
+        `Movimentação de ${movementType === MovementType.ENTRY ? 'entrada' : 'saída'} de ${quantity} un aplicada com sucesso.`
+      );
+      setShowAdjustModal(false);
+      refetch();
+    } catch (err: any) {
+      danger('Erro no Ajuste', err?.message || 'Falha ao salvar ajuste de inventário');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="text-center py-5">
+        <Spinner animation="border" variant="primary" />
+        <p className="mt-2 text-muted">Carregando relatório de inventário...</p>
+      </div>
+    );
+  }
+
+  const divergence = selectedProduct ? physicalCount - selectedProduct.stock : 0;
+
   return (
-    <div>
-      <Alert variant="info">
-        <AlertTriangle size={20} className="me-2" aria-hidden="true" />
-        <strong>Inventário:</strong> Funcionalidade de inventário físico será implementada em breve.
-      </Alert>
+    <div className="inventory-report-tab">
+      {/* KPI Cards */}
+      <Row className="g-3 mb-4">
+        <StatCard title="Total de Itens" value={formatNumber(summary.totalProducts)} icon={Package} color="primary" />
+        <StatCard title="Unidades em Estoque" value={formatNumber(summary.totalStockUnits)} icon={Layers} color="info" />
+        <StatCard title="Valoração Estimada" value={formatCurrency(summary.totalValuation)} icon={DollarSign} color="success" />
+        <Col xs={12} md={6} lg={3}>
+          <Card className="h-100 border-0 shadow-sm">
+            <Card.Body className="d-flex align-items-center p-3">
+              <div
+                className="stat-icon bg-success-subtle text-success"
+                style={{ width: '48px', height: '48px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <CheckCircle2 size={24} aria-hidden="true" />
+              </div>
+              <div className="ms-3 flex-1">
+                <div className="text-muted small">Acurácia de Estoque</div>
+                <div className="d-flex align-items-center gap-2">
+                  <span className="fw-bold fs-5">{summary.accuracyPercentage}%</span>
+                  {summary.outOfStockCount > 0 && (
+                    <Badge bg="danger-subtle" className="text-danger border border-danger-subtle">
+                      {summary.outOfStockCount} zerados
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Filter and Action Bar */}
+      <Card className="shadow-sm border-0 rounded-3 mb-4">
+        <Card.Body className="p-3">
+          <Row className="g-3 align-items-center justify-content-between">
+            <Col xs={12} md={5}>
+              <div className="position-relative">
+                <Search size={16} className="position-absolute start-0 top-50 translate-middle-y ms-3 text-muted" />
+                <Form.Control
+                  type="search"
+                  placeholder="Buscar por produto ou fabricante..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="ps-5 rounded-3"
+                />
+              </div>
+            </Col>
+            <Col xs={12} sm={6} md={3}>
+              <Form.Select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
+                className="rounded-3"
+                aria-label="Filtrar por status"
+              >
+                <option value="all">Todos os Status ({items.length})</option>
+                <option value="ok">Estoque Normal</option>
+                <option value="baixo">Estoque Baixo ({summary.lowStockCount})</option>
+                <option value="zerado">Esgotado / Ruptura ({summary.outOfStockCount})</option>
+              </Form.Select>
+            </Col>
+            <Col xs={12} sm={6} md={4} className="d-flex justify-content-end gap-2">
+              <Button variant="outline-secondary" onClick={handleExportCSV} className="d-flex align-items-center gap-1.5 shadow-sm">
+                <Download size={16} />
+                <span>Exportar CSV</span>
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => items.length > 0 && handleOpenAdjust(items[0])}
+                className="d-flex align-items-center gap-1.5 shadow-sm"
+              >
+                <Plus size={16} />
+                <span>Nova Contagem</span>
+              </Button>
+            </Col>
+          </Row>
+        </Card.Body>
+      </Card>
+
+      {/* Inventory Table */}
+      <Card className="border-0 shadow-sm rounded-3 overflow-hidden">
+        <Card.Header className="bg-white border-bottom p-3 d-flex justify-content-between align-items-center">
+          <div>
+            <h6 className="mb-0 fw-bold">Posição Físico-Financeira do Inventário</h6>
+            <small className="text-muted">Exibindo {filteredItems.length} de {items.length} produtos registrados</small>
+          </div>
+          <Badge bg="light" className="text-dark border">
+            {summary.lowStockCount + summary.outOfStockCount} itens requerem atenção
+          </Badge>
+        </Card.Header>
+        <div
+          tabIndex={0}
+          role="region"
+          aria-label="Tabela de inventário físico"
+          className="table-responsive table-wrapper table-sticky-header"
+        >
+          <Table hover className="mb-0 align-middle">
+            <thead className="bg-light">
+              <tr>
+                <th style={{ width: '40px' }}>#</th>
+                <th>Produto</th>
+                <th>Fabricante</th>
+                <th className="text-center">Estoque Atual</th>
+                <th className="text-center">Estoque Mínimo</th>
+                <th className="text-end">Valor Unitário</th>
+                <th className="text-end">Valoração Total</th>
+                <th className="text-center">Status</th>
+                <th className="text-end">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredItems.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="text-center py-5 text-muted">
+                    <Package size={36} className="opacity-50 mb-2" />
+                    <div>Nenhum produto encontrado com os filtros aplicados.</div>
+                  </td>
+                </tr>
+              ) : (
+                filteredItems.map((item: any, idx: number) => {
+                  let statusBadge = <Badge bg="success-subtle" className="text-success border border-success-subtle">Normal</Badge>;
+                  if (item.status === 'zerado') {
+                    statusBadge = <Badge bg="danger-subtle" className="text-danger border border-danger-subtle">Esgotado</Badge>;
+                  } else if (item.status === 'baixo') {
+                    statusBadge = <Badge bg="warning-subtle" className="text-warning-emphasis border border-warning-subtle">Baixo</Badge>;
+                  }
+
+                  return (
+                    <tr key={item.id} className={item.status === 'zerado' ? 'table-danger-subtle' : ''}>
+                      <td className="text-muted small">{idx + 1}</td>
+                      <td>
+                        <div className="fw-semibold text-dark">{item.name}</div>
+                        <small className="text-muted font-monospace">{item.id.slice(0, 8)}</small>
+                      </td>
+                      <td>
+                        <span className="badge bg-light text-secondary border">
+                          {item.manufacturerName}
+                        </span>
+                      </td>
+                      <td className="text-center">
+                        <span className={cn('fw-bold fs-6', item.stock === 0 ? 'text-danger' : item.stock <= item.minStock ? 'text-warning-emphasis' : 'text-dark')}>
+                          {formatNumber(item.stock)}
+                        </span>
+                      </td>
+                      <td className="text-center text-muted">
+                        {formatNumber(item.minStock)}
+                      </td>
+                      <td className="text-end">
+                        {formatCurrency(item.estimatedUnitPrice)}
+                      </td>
+                      <td className="text-end fw-semibold text-dark">
+                        {formatCurrency(item.totalValuation)}
+                      </td>
+                      <td className="text-center">
+                        {statusBadge}
+                      </td>
+                      <td className="text-end">
+                        <Button
+                          variant="outline-primary"
+                          size="sm"
+                          className="rounded-2 d-inline-flex align-items-center gap-1"
+                          onClick={() => handleOpenAdjust(item)}
+                          title="Conferir ou ajustar estoque"
+                        >
+                          <SlidersHorizontal size={14} />
+                          <span>Ajustar</span>
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </Table>
+        </div>
+      </Card>
+
+      {/* Modal de Ajuste de Inventário */}
+      <Modal show={showAdjustModal} onHide={() => !isSubmitting && setShowAdjustModal(false)} centered>
+        <Modal.Header closeButton={!isSubmitting} className="border-bottom">
+          <Modal.Title className="fs-5 fw-bold d-flex align-items-center gap-2">
+            <SlidersHorizontal size={20} className="text-primary" />
+            <span>Auditoria e Ajuste de Estoque</span>
+          </Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleConfirmAdjust}>
+          <Modal.Body className="p-4">
+            {selectedProduct && (
+              <>
+                <div className="p-3 bg-light rounded-3 mb-3 border">
+                  <div className="text-muted small">Produto Selecionado</div>
+                  <div className="fw-bold fs-6 text-dark">{selectedProduct.name}</div>
+                  <div className="d-flex align-items-center gap-3 mt-2 text-muted small">
+                    <span>Fabricante: <strong>{selectedProduct.manufacturerName}</strong></span>
+                    <span>Estoque Atual no Sistema: <strong>{selectedProduct.stock} un</strong></span>
+                  </div>
+                </div>
+
+                <div className="mb-3">
+                  <Form.Label className="fw-semibold">
+                    Contagem Física Real (Estoque Auditado) <span className="text-danger">*</span>
+                  </Form.Label>
+                  <Form.Control
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={physicalCount}
+                    onChange={(e) => setPhysicalCount(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    required
+                    className="form-control-lg fs-5 fw-bold"
+                  />
+                  <Form.Text className="text-muted">
+                    Informe a quantidade real contada fisicamente na prateleira ou depósito.
+                  </Form.Text>
+                </div>
+
+                {/* Calculation Feedback */}
+                <div className="p-3 rounded-3 mb-3 border bg-white">
+                  <div className="d-flex justify-content-between align-items-center">
+                    <span className="text-muted small">Divergência Calculada:</span>
+                    <span className={cn('fw-bold fs-6', divergence > 0 ? 'text-primary' : divergence < 0 ? 'text-danger' : 'text-success')}>
+                      {divergence > 0 ? `+${divergence} un (Sobra)` : divergence < 0 ? `${divergence} un (Falta)` : '0 un (Acurado)'}
+                    </span>
+                  </div>
+                  {divergence !== 0 && (
+                    <div className="small text-muted mt-1">
+                      {divergence > 0 ? (
+                        <span className="text-primary d-flex align-items-center gap-1">
+                          <ArrowUp size={14} /> Será gerada uma movimentação de <strong>ENTRADA</strong> de {Math.abs(divergence)} unidades.
+                        </span>
+                      ) : (
+                        <span className="text-danger d-flex align-items-center gap-1">
+                          <ArrowDown size={14} /> Será gerada uma movimentação de <strong>SAÍDA</strong> de {Math.abs(divergence)} unidades.
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mb-2">
+                  <Form.Label className="fw-semibold">Justificativa / Observação</Form.Label>
+                  <Form.Control
+                    as="textarea"
+                    rows={2}
+                    value={adjustNotes}
+                    onChange={(e) => setAdjustNotes(e.target.value)}
+                    placeholder="Ex: Auditoria periódica de inventário..."
+                  />
+                </div>
+              </>
+            )}
+          </Modal.Body>
+          <Modal.Footer className="border-top">
+            <Button variant="outline-secondary" onClick={() => setShowAdjustModal(false)} disabled={isSubmitting}>
+              Cancelar
+            </Button>
+            <Button variant="primary" type="submit" disabled={isSubmitting} className="d-flex align-items-center gap-1.5 shadow-sm">
+              {isSubmitting ? (
+                <>
+                  <Spinner size="sm" animation="border" />
+                  <span>Salvando...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={16} />
+                  <span>Confirmar Ajuste</span>
+                </>
+              )}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
     </div>
   );
 }

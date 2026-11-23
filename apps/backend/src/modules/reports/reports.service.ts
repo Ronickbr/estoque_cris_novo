@@ -364,4 +364,78 @@ export class ReportsService {
   private async getSalesStats(days: number): Promise<any> {
     return this.inventoryMovementsService.getSalesStats(days);
   }
+
+  async getInventoryReport(): Promise<any> {
+    const products = await this.productRepository.find({
+      relations: ['manufacturer'],
+      order: { name: 'ASC' },
+    });
+
+    let totalStockUnits = 0;
+    let totalValuation = 0;
+    let lowStockCount = 0;
+    let outOfStockCount = 0;
+
+    const items = products.map((p) => {
+      const stock = Number(p.stock) || 0;
+      const minStock = Number(p.minStock) || 5;
+      const estimatedUnitPrice = 50;
+      const itemValuation = stock * estimatedUnitPrice;
+
+      totalStockUnits += stock;
+      totalValuation += itemValuation;
+
+      let status: 'ok' | 'baixo' | 'zerado' = 'ok';
+      if (stock === 0) {
+        status = 'zerado';
+        outOfStockCount++;
+      } else if (stock <= minStock) {
+        status = 'baixo';
+        lowStockCount++;
+      }
+
+      return {
+        id: p.id,
+        name: p.name,
+        manufacturerId: p.manufacturer?.id || p.manufacturerId || '',
+        manufacturerName: p.manufacturer?.name || 'Sem Fabricante',
+        stock,
+        minStock,
+        estimatedUnitPrice,
+        totalValuation: itemValuation,
+        status,
+        lastUpdated: p.updatedAt,
+      };
+    });
+
+    const totalProducts = products.length;
+    const accuracyPercentage =
+      totalProducts > 0
+        ? Math.round(((totalProducts - outOfStockCount) / totalProducts) * 100)
+        : 100;
+
+    return {
+      summary: {
+        totalProducts,
+        totalStockUnits,
+        totalValuation,
+        lowStockCount,
+        outOfStockCount,
+        accuracyPercentage,
+      },
+      items,
+    };
+  }
+
+  async exportInventoryReport(format: string = 'csv'): Promise<Buffer> {
+    const data = await this.getInventoryReport();
+    const headers = 'ID,Produto,Fabricante,Estoque Atual,Estoque Minimo,Valor Unitario (R$),Valor Total (R$),Status\n';
+    const rows = data.items
+      .map(
+        (i: any) =>
+          `"${i.id}","${(i.name || '').replace(/"/g, '""')}","${(i.manufacturerName || '').replace(/"/g, '""')}",${i.stock},${i.minStock},${i.estimatedUnitPrice.toFixed(2)},${i.totalValuation.toFixed(2)},"${i.status}"`
+      )
+      .join('\n');
+    return Buffer.from(headers + rows, 'utf-8');
+  }
 }

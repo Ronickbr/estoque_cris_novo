@@ -33,11 +33,27 @@ class ApiService {
     );
 
     this.client.interceptors.response.use(
-      (response) => response,
+      (response) => {
+        // If response is a blob or download, keep as is
+        if (response.config.responseType === 'blob') {
+          return response;
+        }
+        // If backend wraps response in { success: true, data: ... }, unwrap it
+        if (
+          response.data &&
+          typeof response.data === 'object' &&
+          'success' in response.data &&
+          'data' in response.data
+        ) {
+          response.data = response.data.data;
+        }
+        return response;
+      },
       async (error: AxiosError<ApiError>) => {
         const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
+        const isAuthEndpoint = originalRequest?.url?.includes('/auth/login') || originalRequest?.url?.includes('/auth/register');
 
-        if (error.response?.status === 401 && !originalRequest._retry) {
+        if (error.response?.status === 401 && !originalRequest?._retry && !isAuthEndpoint) {
           originalRequest._retry = true;
 
           try {

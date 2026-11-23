@@ -25,15 +25,17 @@ class AuthService {
   private neonAuthUrl = import.meta.env.VITE_NEON_AUTH_URL || 'https://auth.neon.tech';
 
   async login(credentials: LoginDto): Promise<AuthResponse> {
-    const response = await api.post<AuthResponse>('/auth/login', credentials);
-    this.setAuthData(response);
-    return response;
+    const response = await api.post<any>('/auth/login', credentials);
+    const authData: AuthResponse = response?.data || response;
+    this.setAuthData(authData);
+    return authData;
   }
 
   async register(userData: RegisterDto): Promise<AuthResponse> {
-    const response = await api.post<AuthResponse>('/auth/register', userData);
-    this.setAuthData(response);
-    return response;
+    const response = await api.post<any>('/auth/register', userData);
+    const authData: AuthResponse = response?.data || response;
+    this.setAuthData(authData);
+    return authData;
   }
 
   async logout(): Promise<void> {
@@ -79,10 +81,18 @@ class AuthService {
     return api.get('/auth/password-policy');
   }
 
-  private setAuthData(authResponse: AuthResponse) {
-    localStorage.setItem('access_token', authResponse.accessToken);
-    localStorage.setItem('user', JSON.stringify(authResponse.user));
-    api.setAuthToken(authResponse.accessToken);
+  private setAuthData(authResponse: any) {
+    const data = authResponse?.data || authResponse;
+    const token = data?.accessToken || authResponse?.accessToken;
+    const user = data?.user || authResponse?.user;
+
+    if (token) {
+      localStorage.setItem('access_token', token);
+      api.setAuthToken(token);
+    }
+    if (user) {
+      localStorage.setItem('user', JSON.stringify(user));
+    }
   }
 
   private clearAuthData() {

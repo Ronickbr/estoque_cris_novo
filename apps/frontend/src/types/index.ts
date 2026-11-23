@@ -142,8 +142,9 @@ export interface Manufacturer {
 }
 
 export interface InventoryMovement {
-  id: number;
-  productId: number;
+  id: string | number;
+  productId: string | number;
+  productName?: string;
   product?: Product;
   type: MovementType;
   quantity: number;
@@ -156,18 +157,20 @@ export interface InventoryMovement {
   depositId?: number;
   deposit?: Deposit;
   notes?: string;
-  userId: number;
+  createdBy?: number;
+  createdByName?: string;
+  userId?: number;
   user?: User;
   createdAt: string;
 }
 
 export enum MovementType {
-  ENTRY = 'entry',
-  EXIT = 'exit',
-  TRANSFER = 'transfer',
-  ADJUSTMENT = 'adjustment',
-  RETURN = 'return',
-  LOSS = 'loss',
+  ENTRY = 'entrada',
+  EXIT = 'saida',
+  TRANSFER = 'transferencia',
+  ADJUSTMENT = 'ajuste',
+  RETURN = 'devolucao',
+  LOSS = 'perda',
 }
 
 export interface Batch {
@@ -295,7 +298,11 @@ export enum StockStatus {
 
 export interface PaginatedResponse<T> {
   data: T[];
-  meta: {
+  total?: number;
+  page?: number;
+  perPage?: number;
+  lastPage?: number;
+  meta?: {
     total: number;
     page: number;
     pageSize: number;

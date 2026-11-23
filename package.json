@@ -18,8 +18,9 @@
     "neon:deploy": "cd apps/backend && neon deploy"
   },
   "devDependencies": {
-    "turbo": "^2.0.0",
     "prettier": "^3.2.0",
+    "puppeteer-core": "^25.18.1",
+    "turbo": "^2.0.0",
     "typescript": "^5.3.0"
   },
   "pnpm": {
@@ -27,9 +28,8 @@
       "zod": "^3.22.0"
     }
   },
-  "packageManager": "npm@10.5.0",
+  "packageManager": "pnpm@9.0.0",
   "engines": {
     "node": ">=20.0.0"
-  },
-  "packageManager": "pnpm@9.0.0"
+  }
 }

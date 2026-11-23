@@ -15,16 +15,18 @@ import {
   X,
   Leaf,
   LogOut,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
-  { path: '/dashboard', icon: House, label: 'Dashboard', roles: [UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER] },
-  { path: '/products', icon: Box, label: 'Produtos', roles: [UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER] },
-  { path: '/manufacturers', icon: Building, label: 'Fabricantes', roles: [UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER] },
-  { path: '/reports', icon: FileBarChart, label: 'Relatórios', roles: [UserRole.ADMIN, UserRole.OPERATOR] },
-  { path: '/inventory', icon: List, label: 'Movimentações', roles: [UserRole.ADMIN, UserRole.OPERATOR] },
+  { path: '/dashboard', icon: House, label: 'Dashboard', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER] },
+  { path: '/products', icon: Box, label: 'Produtos', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER] },
+  { path: '/manufacturers', icon: Building, label: 'Fabricantes', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER] },
+  { path: '/reports', icon: FileBarChart, label: 'Relatórios', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR] },
+  { path: '/inventory', icon: List, label: 'Movimentações', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR] },
   { path: '/backup', icon: Database, label: 'Backup', roles: [UserRole.ADMIN] },
-  { path: '/profile', icon: User, label: 'Perfil', roles: [UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER] },
+  { path: '/profile', icon: User, label: 'Perfil', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER] },
+  { path: '/settings', icon: SettingsIcon, label: 'Configurações', roles: [UserRole.ADMIN, UserRole.USER, UserRole.OPERATOR, UserRole.VIEWER] },
 ];
 
 export function Sidebar() {
@@ -178,6 +180,10 @@ export function Sidebar() {
               <NavDropdown.Item as={NavLink} to="/profile" onClick={closeSidebar}>
                 <User className="me-2" size={16} aria-hidden="true" />
                 Meu Perfil
+              </NavDropdown.Item>
+              <NavDropdown.Item as={NavLink} to="/settings" onClick={closeSidebar}>
+                <SettingsIcon className="me-2" size={16} aria-hidden="true" />
+                Configurações
               </NavDropdown.Item>
               <NavDropdown.Divider />
               <NavDropdown.Item

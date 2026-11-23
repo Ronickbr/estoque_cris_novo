@@ -1,7 +1,19 @@
 import { cn, formatNumber } from '@utils';
 import { useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { ArrowUpRight, ArrowDownRight, Box, Building, ArrowLeftRight, AlertTriangle, Calendar, Trophy, ShoppingCart } from 'lucide-react';
+import { Row, Col, Card } from 'react-bootstrap';
+import {
+  ArrowUpRight,
+  ArrowDownRight,
+  Box,
+  Building,
+  ArrowLeftRight,
+  AlertTriangle,
+  Calendar,
+  Trophy,
+  ShoppingCart,
+  Layers,
+} from 'lucide-react';
 
 const ICON_MAP: Record<string, React.ReactNode> = {
   sales: <ShoppingCart size={24} />,
@@ -12,15 +24,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   manufacturers: <Building size={24} />,
   movements: <ArrowLeftRight size={24} />,
   alerts: <AlertTriangle size={24} />,
-};
-
-const COLOR_VARIANTS = {
-  primary: { bg: 'primary-100', icon: 'primary-700' },
-  secondary: { bg: 'secondary-100', icon: 'secondary-700' },
-  info: { bg: 'info-100', icon: 'info-700' },
-  warning: { bg: 'warning-100', icon: 'warning-700' },
-  success: { bg: 'success-100', icon: 'success-700' },
-  danger: { bg: 'danger-100', icon: 'danger-700' },
+  inventory: <Layers size={24} />,
 };
 
 export interface SummaryCardProps {
@@ -28,12 +32,13 @@ export interface SummaryCardProps {
   label: string;
   description?: string;
   icon?: keyof typeof ICON_MAP | React.ReactNode;
-  variant?: keyof typeof COLOR_VARIANTS;
+  variant?: 'primary' | 'secondary' | 'info' | 'warning' | 'success' | 'danger';
   trend?: { value: number; label?: string; up?: boolean };
   clickable?: boolean;
   href?: string;
   onClick?: () => void;
   animate?: boolean;
+  suffix?: string;
   className?: string;
 }
 
@@ -48,13 +53,16 @@ export function SummaryCard({
   href,
   onClick,
   animate = true,
+  suffix,
   className,
 }: SummaryCardProps) {
   const valueRef = useRef<HTMLHeadingElement>(null);
   const prevValueRef = useRef<number>(0);
-  const colors = COLOR_VARIANTS[variant] || COLOR_VARIANTS.primary;
 
-  const numericValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^\d.-]/g, '')) || 0;
+  const numericValue =
+    typeof value === 'number'
+      ? value
+      : parseFloat(String(value).replace(/[^\d.-]/g, '')) || 0;
 
   useEffect(() => {
     if (animate && valueRef.current && numericValue !== prevValueRef.current) {
@@ -71,7 +79,7 @@ export function SummaryCard({
 
   function animateValue(targetValue: number) {
     const startValue = prevValueRef.current;
-    const duration = 1000;
+    const duration = 600;
     const startTime = performance.now();
 
     const animate = (currentTime: number) => {
@@ -81,7 +89,7 @@ export function SummaryCard({
       const currentValue = startValue + (targetValue - startValue) * eased;
 
       if (valueRef.current) {
-        valueRef.current.textContent = formatValue(currentValue);
+        valueRef.current.textContent = formatValue(Math.round(currentValue));
       }
 
       if (progress < 1) {
@@ -94,64 +102,58 @@ export function SummaryCard({
     requestAnimationFrame(animate);
   }
 
-  const IconComponent = typeof icon === 'string' ? ICON_MAP[icon] : icon;
+  const IconComponent = typeof icon === 'string' ? ICON_MAP[icon] || <Box size={24} /> : icon;
 
-  const content = (
-    <>
-      <div
-        className="summary-card__icon d-flex align-items-center justify-content-center"
-        style={{ '--icon-bg': `var(--color-${colors.bg})`, '--icon-color': `var(--color-${colors.icon})` } as React.CSSProperties}
-        aria-hidden="true"
-      >
-        {IconComponent}
-      </div>
-      <div className="summary-card__content flex-1 min-w-0">
-        <p className="summary-card__label text-muted mb-1 fw-medium small">{label}</p>
-        <h3 ref={valueRef} className="summary-card__value fw-bold mb-1 fs-4 lh-1">
-          {formatValue(numericValue)}
-        </h3>
-        {description && <p className="summary-card__description text-muted small mb-0">{description}</p>}
-        {trend && (
-          <div className={cn('summary-card__trend d-inline-flex align-items-center gap-1 mt-1', trend.up ? 'summary-card__trend--up text-success' : 'summary-card__trend--down text-danger')}>
-            {trend.up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-            <span className="fw-medium small">{trend.value > 0 ? '+' : ''}{trend.value}%</span>
-            {trend.label && <span className="summary-card__trend-label text-muted">{trend.label}</span>}
+  const cardInner = (
+    <Card className={cn('border-0 shadow-sm rounded-3 h-100 transition-all', clickable && 'cursor-pointer hover-shadow', className)}>
+      <Card.Body className="p-3 d-flex align-items-center justify-content-between">
+        <div>
+          <span className="text-muted small fw-medium text-uppercase">{label}</span>
+          <div className="d-flex align-items-baseline gap-1 mt-1">
+            <h3 ref={valueRef} className="fw-bold mb-0 text-dark fs-3 lh-1">
+              {formatValue(numericValue)}
+            </h3>
+            {suffix && <small className="text-muted fw-normal">{suffix}</small>}
           </div>
-        )}
-      </div>
-    </>
+
+          {description && <p className="text-muted small mb-0 mt-1">{description}</p>}
+
+          {trend && (
+            <div
+              className={cn(
+                'd-inline-flex align-items-center gap-1 mt-1 small fw-semibold',
+                trend.up ? 'text-success' : 'text-danger'
+              )}
+            >
+              {trend.up ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
+              <span>{trend.value > 0 ? '+' : ''}{trend.value}%</span>
+              {trend.label && <span className="text-muted fw-normal">({trend.label})</span>}
+            </div>
+          )}
+        </div>
+
+        <div
+          className={cn(
+            'rounded-3 p-3 d-flex align-items-center justify-content-center flex-shrink-0 ms-2',
+            `bg-${variant}-subtle text-${variant}`
+          )}
+          style={{ width: '52px', height: '52px' }}
+        >
+          {IconComponent}
+        </div>
+      </Card.Body>
+    </Card>
   );
 
-  if (clickable && href) {
+  if (href) {
     return (
-      <NavLink
-        to={href}
-        className={cn('summary-card', `summary-card--${variant}`, 'summary-card--clickable', 'text-decoration-none', className)}
-        onClick={(e) => {
-          if (onClick) {
-            e.preventDefault();
-            onClick();
-          }
-        }}
-        aria-label={`${label}: ${formatValue(numericValue)}`}
-      >
-        {content}
+      <NavLink to={href} className="text-decoration-none d-block h-100">
+        {cardInner}
       </NavLink>
     );
   }
 
-  return (
-    <div
-      className={cn('summary-card', `summary-card--${variant}`, clickable && 'summary-card--clickable', className)}
-      tabIndex={clickable ? 0 : undefined}
-      role={clickable ? 'button' : undefined}
-      onClick={clickable ? onClick : undefined}
-      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); } } : undefined}
-      aria-label={`${label}: ${formatValue(numericValue)}`}
-    >
-      {content}
-    </div>
-  );
+  return cardInner;
 }
 
 export interface SummaryCardGridProps {
@@ -160,25 +162,15 @@ export interface SummaryCardGridProps {
   className?: string;
 }
 
-export function SummaryCardGrid({ cards, gap = 'md', className }: SummaryCardGridProps) {
-  const gapSizes = { sm: '0.75rem', md: '1.5rem', lg: '2rem' };
+export function SummaryCardGrid({ cards, className }: SummaryCardGridProps) {
   return (
-    <div
-      className={cn('summary-grid', className)}
-      role="region"
-      aria-label="Resumo do dashboard"
-      style={
-        {
-          display: 'grid',
-          gridTemplateColumns: 'repeat(1, 1fr)',
-          gap: gapSizes[gap],
-        } as React.CSSProperties
-      }
-    >
+    <Row className={cn('g-3', className)}>
       {cards.map((card, index) => (
-        <SummaryCard key={index} {...card} />
+        <Col key={index} xs={12} sm={6} xl={3}>
+          <SummaryCard {...card} />
+        </Col>
       ))}
-    </div>
+    </Row>
   );
 }
 

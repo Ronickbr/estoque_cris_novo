@@ -106,7 +106,8 @@ export function Reports() {
         </div>
         <div className="d-flex gap-2">
           <DropdownButton
-            title={<Button variant="outline-secondary"><Download size={16} className="me-1" aria-hidden="true" /> Exportar</Button>}
+            variant="outline-secondary"
+            title={<><Download size={16} className="me-1" aria-hidden="true" /> Exportar</>}
             id="export-dropdown"
             align="end"
           >

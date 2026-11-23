@@ -15,7 +15,7 @@ export interface MovementQuery {
 }
 
 export interface CreateMovementDto {
-  productId: number;
+  productId: string | number;
   type: MovementType;
   quantity: number;
   unitCost?: number;
@@ -50,7 +50,11 @@ const inventoryService = {
     const params = new URLSearchParams();
     Object.entries(query).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== '') {
-        params.append(key, String(value));
+        if (key === 'pageSize') {
+          params.append('perPage', String(value));
+        } else {
+          params.append(key, String(value));
+        }
       }
     });
     return api.get(`/inventory-movements?${params.toString()}`);

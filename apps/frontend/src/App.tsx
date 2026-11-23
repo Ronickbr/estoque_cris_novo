@@ -10,8 +10,9 @@ import { Products } from '@pages/products/Products';
 import { Manufacturers } from '@pages/manufacturers/Manufacturers';
 import { Reports } from '@pages/reports/Reports';
 import { Backup } from '@pages/backup/Backup';
-// import { Profile } from '@pages/profile/Profile';
-// import { Settings } from '@pages/settings/Settings';
+import { Inventory } from '@pages/inventory/Inventory';
+import { Profile } from '@pages/profile/Profile';
+import { Settings } from '@pages/settings/Settings';
 import { Suspense, lazy } from 'react';
 
 const Register = lazy(() => import('@pages/auth/Register').then((m) => ({ default: m.Register })));
@@ -69,9 +70,10 @@ function AppRoutes() {
         <Route path="/products" element={<Products />} />
         <Route path="/manufacturers" element={<Manufacturers />} />
         <Route path="/reports" element={<Reports />} />
+        <Route path="/inventory" element={<Inventory />} />
         <Route path="/backup" element={<Backup />} />
-        {/* <Route path="/profile" element={<Profile />} /> */}
-        {/* <Route path="/settings" element={<Settings />} /> */}
+        <Route path="/profile" element={<Profile />} />
+        <Route path="/settings" element={<Settings />} />
       </Route>
 
       <Route path="/" element={<Navigate to="/dashboard" replace />} />

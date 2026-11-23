@@ -39,9 +39,9 @@ export function Products() {
 
   const { success, danger, warning } = useToastManager();
 
-  const products = productsQuery.data?.data || [];
-  const categories = categoriesQuery.data || [];
-  const manufacturers = manufacturersQuery.data || [];
+  const products = Array.isArray(productsQuery.data) ? productsQuery.data : (productsQuery.data?.data || []);
+  const categories = Array.isArray(categoriesQuery.data) ? categoriesQuery.data : (categoriesQuery.data?.data || []);
+  const manufacturers = Array.isArray(manufacturersQuery.data) ? manufacturersQuery.data : (manufacturersQuery.data?.data || []);
 
   const isLoading = productsQuery.isLoading;
   const error = productsQuery.isError ? productsQuery.error : null;

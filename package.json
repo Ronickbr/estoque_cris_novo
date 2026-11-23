@@ -1,0 +1,35 @@
+{
+  "name": "estoque-cris-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:cov": "turbo run test:cov",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "docker:build": "docker build -t estoque-cris .",
+    "docker:push": "docker push estoque-cris",
+    "neon:deploy": "cd apps/backend && neon deploy"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "prettier": "^3.2.0",
+    "typescript": "^5.3.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "zod": "^3.22.0"
+    }
+  },
+  "packageManager": "npm@10.5.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@9.0.0"
+}

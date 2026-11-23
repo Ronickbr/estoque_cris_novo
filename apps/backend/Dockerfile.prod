@@ -1,0 +1,48 @@
+# Production Dockerfile - Multi-stage build with distroless
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache python3 make g++
+
+# Copy package files
+COPY package*.json ./
+
+# Install all dependencies (including devDependencies for build)
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Build application
+RUN npm run build
+
+# Remove devDependencies
+RUN npm prune --production
+
+# Production stage - using distroless for minimal attack surface
+FROM gcr.io/distroless/nodejs20-debian12 AS production
+
+WORKDIR /app
+
+# Copy built application and production dependencies from builder
+COPY --from=builder --chown=nonroot:nonroot /app/dist ./dist
+COPY --from=builder --chown=nonroot:nonroot /app/node_modules ./node_modules
+COPY --from=builder --chown=nonroot:nonroot /app/package*.json ./
+
+# Create necessary directories (distroless has limited filesystem, use /tmp for writable dirs)
+# Note: uploads, backups, logs should be mounted as volumes in production
+
+# Use non-root user (distroless includes nonroot user with UID 65532)
+USER nonroot
+
+# Expose port
+EXPOSE 3000
+
+# Health check (distroless doesn't have wget/curl, use node)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/api/v1/health/live', (res) => {process.exit(res.statusCode === 200 ? 0 : 1)}).on('error', () => process.exit(1))"
+
+# Start application
+CMD ["dist/main.js"]

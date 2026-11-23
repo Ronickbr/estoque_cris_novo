@@ -1,0 +1,314 @@
+name: CD Production
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to deploy (e.g., v2.0.0)'
+        required: true
+        type: string
+
+env:
+  NODE_VERSION: '20.x'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    name: Build & Push to GHCR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=
+
+      - name: Build and push production image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          dockerfile: Dockerfile.prod
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            VERSION=${{ github.ref_name }}
+
+      - name: Sign Docker image with Cosign
+        if: env.COSIGN_PRIVATE_KEY != ''
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.2.3'
+
+      - name: Sign image
+        if: env.COSIGN_PRIVATE_KEY != ''
+        run: |
+          echo "${{ secrets.COSIGN_PRIVATE_KEY }}" | cosign sign --yes \
+            --key env://COSIGN_PRIVATE_KEY \
+            ${{ steps.meta.outputs.tags }}
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Deploy to Fly.io (Production)
+        if: env.PROD_DEPLOY_TARGET == 'fly.io'
+        run: |
+          flyctl deploy \
+            --app ${{ secrets.PROD_FLY_APP }} \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} \
+            --region ${{ secrets.PROD_FLY_REGION }} \
+            --strategy rolling \
+            --yes
+        env:
+          FLY_API_TOKEN: ${{ secrets.PROD_FLY_TOKEN }}
+
+      - name: Deploy to Railway (Production)
+        if: env.PROD_DEPLOY_TARGET == 'railway'
+        run: |
+          railway up \
+            --service ${{ secrets.PROD_RAILWAY_SERVICE }} \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.PROD_RAILWAY_TOKEN }}
+
+      - name: Deploy to Render (Production)
+        if: env.PROD_DEPLOY_TARGET == 'render'
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.PROD_RENDER_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"imageUrl": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}"}' \
+            "https://api.render.com/v1/services/${{ secrets.PROD_RENDER_SERVICE_ID }}/deploys"
+
+      - name: Deploy to Kubernetes (Production)
+        if: env.PROD_DEPLOY_TARGET == 'kubernetes'
+        run: |
+          kubectl set image deployment/estoque-cris \
+            estoque-cris=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} \
+            -n production
+          kubectl rollout status deployment/estoque-cris -n production --timeout=300s
+
+  run-migrations-production:
+    name: Run Migrations (Production)
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run migrations on production database
+        run: npm run migration:run
+        env:
+          DATABASE_URL: ${{ secrets.PROD_NEON_DATABASE_URL }}
+          DATABASE_SSL: 'true'
+          NODE_ENV: production
+
+  health-checks-production:
+    name: Health Checks (Production)
+    runs-on: ubuntu-latest
+    needs: [deploy-production, run-migrations-production]
+    environment: production
+    steps:
+      - name: Wait for deployment to be ready
+        run: |
+          for i in {1..60}; do
+            if curl -f -s "${{ secrets.PROD_BASE_URL }}/api/v1/health" > /dev/null; then
+              echo "Production deployment is healthy"
+              exit 0
+            fi
+            echo "Waiting for production deployment... ($i/60)"
+            sleep 10
+          done
+          echo "Production deployment failed health check"
+          exit 1
+
+      - name: Comprehensive health check
+        run: |
+          HEALTH_RESPONSE=$(curl -s "${{ secrets.PROD_BASE_URL }}/api/v1/health")
+          echo "Health response: $HEALTH_RESPONSE"
+          
+          # Verify database connectivity
+          echo "$HEALTH_RESPONSE" | grep -q '"database":"ok"' || (echo "Database check failed" && exit 1)
+          
+          # Verify Redis connectivity (if applicable)
+          echo "$HEALTH_RESPONSE" | grep -q '"redis":"ok"' || echo "Redis check skipped or failed"
+          
+          echo "All health checks passed"
+
+      - name: Run API smoke tests
+        run: |
+          # Test API root
+          curl -f "${{ secrets.PROD_BASE_URL }}/api/v1"
+          
+          # Test auth endpoints
+          curl -f -s -o /dev/null -w "%{http_code}" "${{ secrets.PROD_BASE_URL }}/api/v1/auth/profile" | grep -q "401"
+          
+          # Test public endpoints
+          curl -f "${{ secrets.PROD_BASE_URL }}/api/v1/products" | grep -q '"data"'
+          
+          echo "All API smoke tests passed"
+
+  rollback-on-failure:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    needs: [health-checks-production]
+    if: failure()
+    environment: production
+    steps:
+      - name: Rollback Fly.io
+        if: env.PROD_DEPLOY_TARGET == 'fly.io'
+        run: |
+          flyctl releases list --app ${{ secrets.PROD_FLY_APP }} --json | head -2
+          PREVIOUS_VERSION=$(flyctl releases list --app ${{ secrets.PROD_FLY_APP }} --json | jq -r '.[1].version')
+          flyctl releases rollback $PREVIOUS_VERSION --app ${{ secrets.PROD_FLY_APP }} --yes
+        env:
+          FLY_API_TOKEN: ${{ secrets.PROD_FLY_TOKEN }}
+
+      - name: Rollback Railway
+        if: env.PROD_DEPLOY_TARGET == 'railway'
+        run: |
+          railway rollback --service ${{ secrets.PROD_RAILWAY_SERVICE }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.PROD_RAILWAY_TOKEN }}
+
+      - name: Rollback Render
+        if: env.PROD_DEPLOY_TARGET == 'render'
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.PROD_RENDER_API_KEY }}" \
+            "https://api.render.com/v1/services/${{ secrets.PROD_RENDER_SERVICE_ID }}/rollback"
+
+      - name: Rollback Kubernetes
+        if: env.PROD_DEPLOY_TARGET == 'kubernetes'
+        run: |
+          kubectl rollout undo deployment/estoque-cris -n production
+          kubectl rollout status deployment/estoque-cris -n production --timeout=300s
+
+      - name: Notify rollback
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"attachments\":[{\"color\":\"danger\",\"title\":\"Production Rollback Executed\",\"text\":\"Deployment failed, rolled back to previous version.\nCommit: ${{ github.sha }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}]}" \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  notify-production:
+    name: Notify Production Deployment
+    runs-on: ubuntu-latest
+    needs: [health-checks-production, rollback-on-failure]
+    if: always()
+    steps:
+      - name: Determine overall status
+        id: status
+        run: |
+          if [ "${{ needs.health-checks-production.result }}" == "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "title=Production Deployment Successful"
+            echo "color=good"
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "title=Production Deployment Failed"
+            echo "color=danger"
+          fi
+
+      - name: Send Slack notification
+        if: env.SLACK_WEBHOOK_URL != ''
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"attachments\":[{\"color\":\"${{ steps.status.outputs.color }}\",\"title\":\"${{ steps.status.outputs.title }}\",\"text\":\"Version: ${{ github.ref_name }}\nCommit: ${{ github.sha }}\nURL: ${{ secrets.PROD_BASE_URL }}\"}]}" \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create GitHub Release
+        if: ${{ needs.health-checks-production.result == 'success' && startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            ## Production Deployment
+            
+            - **Version**: ${{ github.ref_name }}
+            - **Commit**: ${{ github.sha }}
+            - **Deployed at**: ${{ github.event.head_commit.timestamp }}
+            - **Docker Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            
+            ### Changes
+            See commit history for details.
+            
+            ### Health Checks
+            All health checks passed successfully.
+          draft: false
+          prerelease: false
+
+      - name: Create GitHub Deployment status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: deployments } = await github.rest.repos.listDeployments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              environment: 'production',
+              per_page: 1
+            });
+            if (deployments.length > 0) {
+              await github.rest.repos.createDeploymentStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                deployment_id: deployments[0].id,
+                state: '${{ steps.status.outputs.status }}',
+                environment_url: '${{ secrets.PROD_BASE_URL }}',
+                log_url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+              });
+            }

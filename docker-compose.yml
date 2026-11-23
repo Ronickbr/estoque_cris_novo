@@ -1,0 +1,111 @@
+version: '3.8'
+
+services:
+  # PostgreSQL (Neon local development)
+  postgres:
+    image: postgres:16-alpine
+    container_name: estoque-cris-postgres
+    environment:
+      POSTGRES_DB: estoque_cris
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and sessions
+  redis:
+    image: redis:7-alpine
+    container_name: estoque-cris-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend-runner
+    container_name: estoque-cris-backend
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/estoque_cris?schema=public
+      REDIS_URL: redis://redis:6379
+      NEON_AUTH_BASE_URL: ${NEON_AUTH_BASE_URL}
+      NEON_AUTH_JWKS_URL: ${NEON_AUTH_JWKS_URL}
+      NEON_AUTH_AUDIENCE: ${NEON_AUTH_AUDIENCE:-neondb}
+      NEON_AUTH_ISSUER: ${NEON_AUTH_ISSUER}
+      PORT: 5000
+      API_PREFIX: api/v1
+      CORS_ORIGIN: http://localhost:3000
+      LOG_LEVEL: debug
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps/backend:/app/apps/backend
+      - ./packages/shared:/app/packages/shared
+    command: sh -c "pnpm run start:dev"
+
+  # Frontend (Vite dev server)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend-builder
+    container_name: estoque-cris-frontend
+    environment:
+      VITE_API_URL: http://localhost:5000/api/v1
+      VITE_NEON_AUTH_BASE_URL: ${NEON_AUTH_BASE_URL}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    volumes:
+      - ./apps/frontend:/app/apps/frontend
+      - ./packages/shared:/app/packages/shared
+    command: sh -c "pnpm run dev --host 0.0.0.0"
+
+  # Neon Functions local dev (optional)
+  neon-functions:
+    image: node:20-alpine
+    container_name: estoque-cris-neon-functions
+    working_dir: /app
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/estoque_cris?schema=public
+      NEON_AUTH_BASE_URL: ${NEON_AUTH_BASE_URL}
+      NEON_AUTH_JWKS_URL: ${NEON_AUTH_JWKS_URL}
+    volumes:
+      - ./apps/backend:/app/apps/backend
+      - ./packages/shared:/app/packages/shared
+    command: sh -c "cd /app/apps/backend && pnpm run dev"
+    ports:
+      - "3001:3001"
+    depends_on:
+      - postgres
+      - redis
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: estoque-cris-network

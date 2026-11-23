@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_SSL=true
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=1h
+      - PASSWORD_MIN_LENGTH=8
+      - PASSWORD_REQUIRE_UPPERCASE=true
+      - PASSWORD_REQUIRE_LOWERCASE=true
+      - PASSWORD_REQUIRE_NUMBERS=true
+      - PASSWORD_REQUIRE_SYMBOLS=true
+      - UPLOAD_DEST=/app/uploads
+      - BACKUP_DIR=/app/backups
+      - LOG_LEVEL=warn
+      - CORS_ORIGIN=${CORS_ORIGIN}
+    volumes:
+      - uploads:/app/uploads
+      - backups:/app/backups
+      - logs:/app/log
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/v1/health/live', (res) => {process.exit(res.statusCode === 200 ? 0 : 1)}).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  uploads:
+  backups:
+  logs:

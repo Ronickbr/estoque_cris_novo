@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@estoque-cris/shared/*": ["packages/shared/src/*"]
+    }
+  },
+  "include": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./apps/backend" },
+    { "path": "./apps/frontend" }
+  ]
+}

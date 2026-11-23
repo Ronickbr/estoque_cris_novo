@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/estoque_cris
+      - DATABASE_SSL=false
+      - JWT_SECRET=dev-secret-key-change-in-production
+      - JWT_EXPIRES_IN=1h
+      - PASSWORD_MIN_LENGTH=8
+      - PASSWORD_REQUIRE_UPPERCASE=true
+      - PASSWORD_REQUIRE_LOWERCASE=true
+      - PASSWORD_REQUIRE_NUMBERS=true
+      - PASSWORD_REQUIRE_SYMBOLS=true
+      - UPLOAD_DEST=./uploads
+      - BACKUP_DIR=./backups
+      - LOG_LEVEL=debug
+      - CORS_ORIGIN=http://localhost:3000
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - uploads:/app/uploads
+      - backups:/app/backups
+      - logs:/app/log
+    depends_on:
+      db:
+        condition: service_healthy
+    command: npm run start:dev
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=estoque_cris
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Test database for e2e tests
+  test-db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=test
+      - POSTGRES_PASSWORD=test
+      - POSTGRES_DB=test_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - test_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  test_postgres_data:
+  uploads:
+  backups:
+  logs:

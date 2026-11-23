@@ -1,0 +1,95 @@
+name: Deploy Neon Functions
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      function_name:
+        description: 'Function name to deploy (optional, deploys all if empty)'
+        required: false
+        type: string
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  deploy-functions:
+    name: Deploy to Neon Functions
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build backend
+        run: cd apps/backend && npm run build
+
+      - name: Setup Neon CLI
+        uses: neon/cli-action@v1
+        with:
+          api-key: ${{ secrets.NEON_API_KEY }}
+
+      - name: Deploy Neon Functions
+        run: |
+          NEON_BRANCH="${{ github.event.inputs.environment == 'production' && 'production' || 'staging' }}"
+          echo "Deploying to branch: $NEON_BRANCH"
+          
+          # Deploy functions
+          if [ -n "${{ github.event.inputs.function_name }}" ]; then
+            neon functions deploy ${{ github.event.inputs.function_name }} --branch $NEON_BRANCH
+          else
+            # Deploy all functions from neon.ts config
+            neon deploy --branch $NEON_BRANCH
+          fi
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+
+      - name: Verify deployment
+        run: |
+          NEON_BRANCH="${{ github.event.inputs.environment == 'production' && 'production' || 'staging' }}"
+          NEON_FUNCTION_HOST=$(neon functions list --branch $NEON_BRANCH --output json | jq -r '.[0].host // empty')
+          
+          if [ -n "$NEON_FUNCTION_HOST" ]; then
+            echo "Function deployed at: https://$NEON_FUNCTION_HOST"
+            curl -f "https://$NEON_FUNCTION_HOST/health" || echo "Health check failed"
+          else
+            echo "No functions found or deployment failed"
+            exit 1
+          fi
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+
+      - name: Run smoke tests
+        run: |
+          NEON_BRANCH="${{ github.event.inputs.environment == 'production' && 'production' || 'staging' }}"
+          NEON_FUNCTION_HOST=$(neon functions list --branch $NEON_BRANCH --output json | jq -r '.[0].host // empty')
+          
+          if [ -n "$NEON_FUNCTION_HOST" ]; then
+            # Test auth endpoint
+            curl -f -X POST "https://$NEON_FUNCTION_HOST/api/v1/auth/password-policy" || echo "Auth policy check failed"
+            
+            # Test health endpoint
+            curl -f "https://$NEON_FUNCTION_HOST/health/ready" || echo "Ready check failed"
+          fi
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}

@@ -1,0 +1,210 @@
+name: CD Staging
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20.x'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  STAGING_DEPLOY_TARGET: fly.io  # Options: fly.io, railway, render
+
+jobs:
+  build-and-push:
+    name: Build & Push to GHCR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=staging-latest,enable={{is_default_branch}}
+            type=raw,value=staging-${{ github.sha }},enable=true
+
+      - name: Build and push production image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          dockerfile: Dockerfile.prod
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_VERSION=${{ env.NODE_VERSION }}
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: staging
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Fly CLI
+        if: env.STAGING_DEPLOY_TARGET == 'fly.io'
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly.io
+        if: env.STAGING_DEPLOY_TARGET == 'fly.io'
+        run: |
+          flyctl deploy \
+            --app ${{ secrets.STAGING_FLY_APP }} \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.sha }} \
+            --region ${{ secrets.STAGING_FLY_REGION }} \
+            --yes
+        env:
+          FLY_API_TOKEN: ${{ secrets.STAGING_FLY_TOKEN }}
+
+      - name: Deploy to Railway
+        if: env.STAGING_DEPLOY_TARGET == 'railway'
+        run: |
+          railway up \
+            --service ${{ secrets.STAGING_RAILWAY_SERVICE }} \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.sha }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.STAGING_RAILWAY_TOKEN }}
+
+      - name: Deploy to Render
+        if: env.STAGING_DEPLOY_TARGET == 'render'
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.STAGING_RENDER_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"imageUrl": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.sha }}"}' \
+            "https://api.render.com/v1/services/${{ secrets.STAGING_RENDER_SERVICE_ID }}/deploys"
+
+  run-migrations-staging:
+    name: Run Migrations (Staging)
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    environment: staging
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run migrations on staging database
+        run: npm run migration:run
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_NEON_DATABASE_URL }}
+          DATABASE_SSL: 'true'
+          NODE_ENV: production
+
+  smoke-tests-staging:
+    name: Smoke Tests (Staging)
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, run-migrations-staging]
+    environment: staging
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wait for deployment to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -f -s "${{ secrets.STAGING_BASE_URL }}/api/v1/health" > /dev/null; then
+              echo "Staging deployment is healthy"
+              exit 0
+            fi
+            echo "Waiting for staging deployment... ($i/30)"
+            sleep 10
+          done
+          echo "Staging deployment failed health check"
+          exit 1
+
+      - name: Run smoke tests
+        run: |
+          # Test health endpoint
+          curl -f "${{ secrets.STAGING_BASE_URL }}/api/v1/health"
+          
+          # Test API root
+          curl -f "${{ secrets.STAGING_BASE_URL }}/api/v1"
+          
+          # Test auth endpoints (should return 401 without token)
+          curl -f -s -o /dev/null -w "%{http_code}" "${{ secrets.STAGING_BASE_URL }}/api/v1/auth/profile" | grep -q "401"
+          
+          echo "All smoke tests passed"
+
+  notify-staging:
+    name: Notify Staging Deployment
+    runs-on: ubuntu-latest
+    needs: smoke-tests-staging
+    if: always()
+    steps:
+      - name: Send Slack notification
+        if: env.SLACK_WEBHOOK_URL != ''
+        run: |
+          STATUS="${{ needs.smoke-tests-staging.result }}"
+          COLOR="good"
+          if [ "$STATUS" == "failure" ]; then
+            COLOR="danger"
+          fi
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"attachments\":[{\"color\":\"$COLOR\",\"title\":\"Staging Deployment $STATUS\",\"text\":\"Commit: ${{ github.sha }}\nBranch: ${{ github.ref_name }}\nURL: ${{ secrets.STAGING_BASE_URL }}\"}]}" \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Create GitHub Deployment status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: deployments } = await github.rest.repos.listDeployments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              environment: 'staging',
+              per_page: 1
+            });
+            if (deployments.length > 0) {
+              await github.rest.repos.createDeploymentStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                deployment_id: deployments[0].id,
+                state: '${{ needs.smoke-tests-staging.result }}',
+                environment_url: '${{ secrets.STAGING_BASE_URL }}',
+                log_url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+              });
+            }

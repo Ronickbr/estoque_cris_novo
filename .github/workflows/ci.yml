@@ -1,0 +1,259 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: '20'
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+
+jobs:
+  # Lint and Type Check
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run lint
+        run: pnpm run lint
+
+      - name: Type check backend
+        run: cd apps/backend && npx tsc --noEmit
+
+      - name: Type check frontend
+        run: cd apps/frontend && npx tsc --noEmit
+
+      - name: Type check shared
+        run: cd packages/shared && npx tsc --noEmit
+
+  # Test
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run backend tests
+        run: cd apps/backend && npm run test:cov
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/estoque_cris_test
+          NEON_AUTH_BASE_URL: https://test.neonauth.com
+          NEON_AUTH_JWKS_URL: https://test.neonauth.com/.well-known/jwks.json
+          NEON_AUTH_AUDIENCE: neondb
+          NEON_AUTH_ISSUER: https://test.neonauth.com
+
+      - name: Run frontend tests
+        run: cd apps/frontend && npm run test
+        env:
+          VITE_API_URL: http://localhost:5000/api/v1
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./apps/backend/coverage/lcov.info,./apps/frontend/coverage/lcov.info
+          fail_ci_if_error: false
+
+  # Build
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        run: pnpm run build
+
+      - name: Upload backend build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-dist
+          path: apps/backend/dist
+          retention-days: 1
+
+      - name: Upload frontend build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: apps/frontend/dist
+          retention-days: 1
+
+  # Deploy Frontend to Vercel (Preview)
+  deploy-frontend-preview:
+    name: Deploy Frontend to Vercel (Preview)
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel@latest
+
+      - name: Pull Vercel Environment
+        run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build Project Artifacts
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy to Vercel Preview
+        run: |
+          url=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }} --scope=${{ secrets.VERCEL_ORG_ID }} 2>&1 | tail -1)
+          echo "PREVIEW_URL=$url" >> $GITHUB_ENV
+
+      - name: Comment PR with Preview URL
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '🚀 **Vercel Preview Deployment Ready**\n\n🔗 Preview URL: ${{ env.PREVIEW_URL }}\n\nThis deployment will update automatically on new commits to this PR.'
+            })
+
+  # Deploy Frontend to Vercel (Production)
+  deploy-frontend-production:
+    name: Deploy Frontend to Vercel (Production)
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel@latest
+
+      - name: Pull Vercel Environment
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build Project Artifacts
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy to Vercel Production
+        run: |
+          url=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} --scope=${{ secrets.VERCEL_ORG_ID }} 2>&1 | tail -1)
+          echo "PRODUCTION_URL=$url" >> $GITHUB_ENV
+
+      - name: Run production health checks
+        run: |
+          sleep 10
+          curl -f ${{ env.PRODUCTION_URL }}/health || exit 1
+
+      - name: Notify deployment
+        if: always()
+        run: |
+          echo "Frontend deployment ${{ job.status }} to production: ${{ env.PRODUCTION_URL }}"
+          # Add Slack/Discord notification here
+
+  # Deploy Backend to Neon Functions (Staging)
+  deploy-backend-staging:
+    name: Deploy Backend to Neon Functions (Staging)
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Neon CLI
+        uses: neon/cli-action@v1
+        with:
+          api-key: ${{ secrets.NEON_API_KEY }}
+
+      - name: Deploy to Neon Staging Branch
+        run: |
+          neon branches create staging --parent production
+          neon deploy --branch staging
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+
+      - name: Run staging health checks
+        run: |
+          sleep 30
+          curl -f https://staging-api.estoque-cris.com/health/live || exit 1
+
+  # Deploy Backend to Neon Functions (Production)
+  deploy-backend-production:
+    name: Deploy Backend to Neon Functions (Production)
+    runs-on: ubuntu-latest
+    needs: deploy-backend-staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Neon CLI
+        uses: neon/cli-action@v1
+        with:
+          api-key: ${{ secrets.NEON_API_KEY }}
+
+      - name: Deploy to Neon Production
+        run: |
+          neon deploy --branch production
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+
+      - name: Run production health checks
+        run: |
+          sleep 30
+          curl -f https://api.estoque-cris.com/health/live || exit 1
+
+      - name: Notify deployment
+        if: always()
+        run: |
+          echo "Backend deployment ${{ job.status }} to production"
+          # Add Slack/Discord notification here

@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 
 import { User, UserRole } from '../../users/entities/user.entity';
@@ -27,16 +28,12 @@ import {
 
 // Dynamic imports for ESM modules
 let neonAuthModule: any;
-let supabaseAdapterModule: any;
 
 async function loadNeonAuth() {
   if (!neonAuthModule) {
     neonAuthModule = await import('@neon/auth');
   }
-  if (!supabaseAdapterModule) {
-    supabaseAdapterModule = require('@neon/auth/vanilla/adapters');
-  }
-  return { neonAuthModule, supabaseAdapterModule };
+  return { neonAuthModule };
 }
 
 @Injectable()
@@ -51,20 +48,29 @@ export class AuthService {
     private userRepository: Repository<User>,
     private usersService: UsersService,
     private passwordPolicy: PasswordPolicyService,
-    private configService: ConfigService
+    private configService: ConfigService,
+    private jwtService: JwtService
   ) {
     this.initializeNeonAuth();
   }
 
   private async initializeNeonAuth(): Promise<void> {
-    const authUrl = this.configService.get<string>('NEON_AUTH_BASE_URL');
-    if (!authUrl) {
-      throw new Error('NEON_AUTH_BASE_URL is not configured');
+    try {
+      const authUrl = this.configService.get<string>('NEON_AUTH_BASE_URL');
+      if (!authUrl) {
+        return;
+      }
+      const { neonAuthModule } = await loadNeonAuth();
+      this.neonAuthClient = neonAuthModule.createAuthClient(authUrl, {
+        fetchOptions: {
+          headers: {
+            Origin: this.configService.get<string>('CORS_ORIGIN', 'http://localhost:3000'),
+          },
+        },
+      });
+    } catch (e: any) {
+      console.warn('Neon Auth initialization notice:', e?.message);
     }
-    const { neonAuthModule, supabaseAdapterModule } = await loadNeonAuth();
-    this.neonAuthClient = neonAuthModule.createAuthClient(authUrl, {
-      adapter: supabaseAdapterModule.SupabaseAuthAdapter(),
-    });
   }
 
   private async ensureClient(): Promise<any> {
@@ -80,37 +86,61 @@ export class AuthService {
     // Check rate limiting
     this.checkRateLimit(identifier);
 
-    const client = await this.ensureClient();
-
-    // Authenticate with Neon Auth using email/password
-    const { data, error } = await client.signInWithPassword({
-      email: identifier,
-      password: password,
+    // 1. Check local database
+    const user = await this.userRepository.findOne({
+      where: [{ email: identifier }, { nome: identifier }],
     });
 
-    if (error) {
-      this.recordFailedAttempt(identifier);
-      throw new UnauthorizedException('Credenciais inválidas');
+    let isValid = false;
+    if (user && user.senha) {
+      isValid = await user.validatePassword(password);
     }
 
-    this.clearFailedAttempts(identifier);
-
-    // Get the access token from Neon Auth
-    const accessToken = await client.getJWTToken();
-    
-    // Find or create local user
-    let user = await this.userRepository.findOne({ where: { email: identifier } });
-    
-    if (!user) {
-      // User authenticated with Neon Auth but doesn't exist locally
-      // Create local user record
-      user = await this.createLocalUserFromNeonAuth(data.user);
+    if (isValid && user) {
+      this.clearFailedAttempts(identifier);
+      const token = this.jwtService.sign({
+        sub: user.id,
+        email: user.email,
+        nivel: user.nivel,
+      });
+      return {
+        accessToken: token,
+        user: this.toUserResponse(user),
+      };
     }
 
-    return {
-      accessToken: accessToken || '',
-      user: this.toUserResponse(user),
-    };
+    // 2. Fallback to Neon Auth
+    try {
+      const client = await this.ensureClient();
+      if (client?.signIn?.email) {
+        const { data, error } = await client.signIn.email({
+          email: identifier,
+          password: password,
+        });
+
+        if (!error && data?.user) {
+          this.clearFailedAttempts(identifier);
+          let localUser = await this.userRepository.findOne({ where: { email: data.user.email } });
+          if (!localUser) {
+            localUser = await this.createLocalUserFromNeonAuth(data.user);
+          }
+          const token = this.jwtService.sign({
+            sub: localUser.id,
+            email: localUser.email,
+            nivel: localUser.nivel,
+          });
+          return {
+            accessToken: token,
+            user: this.toUserResponse(localUser),
+          };
+        }
+      }
+    } catch {
+      // Fall through to invalid credentials
+    }
+
+    this.recordFailedAttempt(identifier);
+    throw new UnauthorizedException('Credenciais inválidas');
   }
 
   async register(registerDto: RegisterDto): Promise<AuthResponseDto> {
@@ -135,34 +165,37 @@ export class AuthService {
       throw new ConflictException('Nome de usuário já existe');
     }
 
-    const client = await this.ensureClient();
-
-    // Register with Neon Auth
-    const { data, error } = await client.signUp({
+    // Create user locally in PostgreSQL with password hashed via @BeforeInsert
+    const user = this.userRepository.create({
+      nome: registerDto.nome,
       email: registerDto.email,
-      password: registerDto.senha,
-      options: {
-        data: {
-          name: registerDto.nome,
-          role: registerDto.nivel,
-        },
-      },
+      senha: registerDto.senha,
+      nivel: registerDto.nivel || UserRole.USER,
     });
+    await this.userRepository.save(user);
 
-    if (error) {
-      throw new BadRequestException({
-        message: 'Erro ao criar usuário no Neon Auth',
-        errors: [error.message],
-      });
+    // Also register with Neon Auth if available (non-blocking)
+    try {
+      const client = await this.ensureClient();
+      if (client?.signUp?.email) {
+        await client.signUp.email({
+          email: registerDto.email,
+          password: registerDto.senha,
+          name: registerDto.nome,
+        });
+      }
+    } catch (neonErr: any) {
+      console.warn('Neon Auth registration notice:', neonErr?.message);
     }
 
-    // Create local user
-    const user = await this.createLocalUserFromNeonAuth(data.user);
-    
-    const accessToken = await client.getJWTToken();
+    const accessToken = this.jwtService.sign({
+      sub: user.id,
+      email: user.email,
+      nivel: user.nivel,
+    });
 
     return {
-      accessToken: accessToken || '',
+      accessToken,
       user: this.toUserResponse(user),
     };
   }
@@ -323,17 +356,18 @@ export class AuthService {
   }
 
   async refreshToken(userId: number): Promise<RefreshTokenResponseDto> {
-    // Neon Auth handles token refresh automatically via getJWTToken
-    // This endpoint might not be needed with Neon Auth
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new UnauthorizedException('Usuário não encontrado');
     }
 
-    const client = await this.ensureClient();
-    const accessToken = await client.getJWTToken();
+    const accessToken = this.jwtService.sign({
+      sub: user.id,
+      email: user.email,
+      nivel: user.nivel,
+    });
 
-    return { accessToken: accessToken || '' };
+    return { accessToken };
   }
 
   async validateUser(userId: number): Promise<UserResponseDto | null> {

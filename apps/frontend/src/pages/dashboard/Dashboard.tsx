@@ -1,4 +1,5 @@
 import { Row, Col, Card, Badge, Button, DropdownButton, Dropdown } from 'react-bootstrap';
+import { Link } from 'react-router-dom';
 import { useDashboardStats } from '@hooks/useReports';
 import { SummaryCard, SummaryCardGrid } from '@components/feedback/SummaryCard';
 import { StockIndicator } from '@components/feedback/StockIndicator';
@@ -13,6 +14,8 @@ import {
   ShoppingCart,
   Package,
   Activity,
+  Plus,
+  Layers,
 } from 'lucide-react';
 
 export function Dashboard() {
@@ -98,11 +101,23 @@ export function Dashboard() {
           <h1 className="h2 fw-bold mb-1">Dashboard</h1>
           <p className="text-muted mb-0">Visão geral do seu estoque</p>
         </div>
-        <div className="d-flex gap-2">
-          <Button variant="outline-primary" onClick={() => refetch()} disabled={isLoading} aria-label="Atualizar dados">
+        <div className="d-flex flex-wrap gap-2">
+          <Button variant="outline-secondary" onClick={() => refetch()} disabled={isLoading} aria-label="Atualizar dados">
             <Activity size={16} className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
             <span className="ms-1 d-none d-sm-inline">Atualizar</span>
           </Button>
+          <Link to="/inventory" className="text-decoration-none">
+            <Button variant="outline-primary" className="d-flex align-items-center gap-1">
+              <Layers size={16} />
+              <span>Movimentações</span>
+            </Button>
+          </Link>
+          <Link to="/products" className="text-decoration-none">
+            <Button variant="primary" className="d-flex align-items-center gap-1 shadow-sm">
+              <Plus size={16} />
+              <span>Produtos</span>
+            </Button>
+          </Link>
         </div>
       </div>
 

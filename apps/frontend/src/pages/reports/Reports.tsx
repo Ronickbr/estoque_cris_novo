@@ -120,20 +120,30 @@ export function Reports() {
         </div>
       </div>
 
-      <div className="report-tabs mb-4" role="tablist" aria-label="Tipos de relatório">
-        {REPORT_TYPES.map((type) => (
-          <Button
-            key={type.id}
-            variant={activeTab === type.id ? 'primary' : 'outline-secondary'}
-            onClick={() => setActiveTab(type.id as typeof activeTab)}
-            className="me-2"
-            role="tab"
-            aria-selected={activeTab === type.id}
-          >
-            <type.icon size={16} className="me-1" aria-hidden="true" />
-            {type.label}
-          </Button>
-        ))}
+      <div className="report-tabs bg-white p-1.5 rounded-pill border shadow-sm d-inline-flex flex-wrap gap-1 mb-4" role="tablist" aria-label="Tipos de relatório">
+        {REPORT_TYPES.map((type) => {
+          const isActive = activeTab === type.id;
+          return (
+            <button
+              key={type.id}
+              type="button"
+              onClick={() => setActiveTab(type.id as typeof activeTab)}
+              className={cn(
+                'btn btn-sm d-inline-flex align-items-center gap-1.5 px-3 py-2 rounded-pill transition-all border-0',
+                isActive
+                  ? 'bg-primary text-white shadow-sm fw-semibold'
+                  : 'bg-transparent text-secondary hover:bg-light fw-medium'
+              )}
+              role="tab"
+              aria-selected={isActive}
+              id={`tab-${type.id}`}
+              aria-controls={`panel-${type.id}`}
+            >
+              <type.icon size={16} aria-hidden="true" />
+              <span>{type.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="date-range-selector mb-4 d-flex flex-wrap gap-3 align-items-center">

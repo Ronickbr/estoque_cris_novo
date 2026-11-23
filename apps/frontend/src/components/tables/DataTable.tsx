@@ -1,7 +1,7 @@
-import { Table, Pagination, Spinner, DropdownButton, Dropdown, Button } from 'react-bootstrap';
+import { Table, Pagination, Spinner, DropdownButton, Dropdown, Button, Card, Form } from 'react-bootstrap';
 import { useState, useMemo, useCallback, useRef, useEffect, ReactNode, Fragment } from 'react';
 import { cn, formatNumber, formatDate, escapeHtml } from '@utils';
-import { ChevronUp, ChevronDown, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronUp, ChevronDown, Search, ChevronLeft, ChevronRight, Package, ArrowUpDown } from 'lucide-react';
 
 export interface Column<T> {
   field: keyof T | string;
@@ -251,43 +251,29 @@ function DataTable<T extends Record<string, unknown>>({
   }
 
   return (
-    <div className={cn('data-table-wrapper', className)}>
-      {(searchable || pagination) && (
-        <div className="data-table__toolbar d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
-          {searchable && (
-            <div className="data-table__search-wrapper position-relative" style={{ minWidth: '250px' }}>
-              <Search className="position-absolute start-0 top-50 translate-middle-y text-secondary ps-3" size={18} aria-hidden="true" />
-              <input
-                type="search"
-                className="form-control form-control-sm ps-5"
-                placeholder="Buscar..."
-                value={searchTerm}
-                onChange={(e) => handleSearch(e.target.value)}
-                aria-label="Buscar na tabela"
-              />
-            </div>
-          )}
-          {pagination && (
-            <div className="data-table__page-size">
-              <select
-                className="form-select form-select-sm"
-                value={pageSize}
-                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-                aria-label="Itens por página"
-                style={{ width: 'auto' }}
-              >
-                {pageSizes.map((size) => (
-                  <option key={size} value={size}>
-                    {size} por página
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
+    <Card className={cn('border-0 shadow-sm rounded-3 overflow-hidden', className)}>
+      {searchable && (
+        <Card.Header className="bg-white border-bottom p-3">
+          <div className="data-table__search-wrapper position-relative" style={{ maxWidth: '320px' }}>
+            <Search className="position-absolute start-0 top-50 translate-middle-y text-secondary ms-3" size={16} aria-hidden="true" />
+            <input
+              type="search"
+              className="form-control form-control-sm ps-5 rounded-3"
+              placeholder="Buscar..."
+              value={searchTerm}
+              onChange={(e) => handleSearch(e.target.value)}
+              aria-label="Buscar na tabela"
+            />
+          </div>
+        </Card.Header>
       )}
 
-      <div className="data-table__container table-responsive">
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label="Tabela de dados"
+        className="table-responsive table-wrapper table-sticky-header"
+      >
         <Table
           className={cn('data-table table--borderless table--striped', 'mb-0')}
           responsive={false}
@@ -357,10 +343,10 @@ function DataTable<T extends Record<string, unknown>>({
             {pageData.length === 0 ? (
               <tr>
                 <td colSpan={columns.length + (selectable ? 1 : 0) + (actions.length > 0 ? 1 : 0)} className="text-center py-5">
-                  <div className="empty-state">
-                    <i className={`bi bi-${emptyIcon} empty-state__icon`} aria-hidden="true" />
-                    <h3 className="empty-state__title">Nenhum registro</h3>
-                    <p className="empty-state__message">{emptyMessage}</p>
+                  <div className="empty-state py-3">
+                    <Package size={44} className="text-muted opacity-40 mb-3" aria-hidden="true" />
+                    <h5 className="fw-semibold text-muted mb-1">Nenhum registro encontrado</h5>
+                    <p className="text-muted small mb-0">{emptyMessage || 'Nenhum dado cadastrado para exibição.'}</p>
                   </div>
                 </td>
               </tr>
@@ -474,69 +460,92 @@ function DataTable<T extends Record<string, unknown>>({
         </Table>
       </div>
 
-      {pagination && totalPages > 1 && (
-        <div className="data-table__footer d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3 pt-3 border-top">
-          <div className="data-table__info small text-muted" aria-live="polite">
-            {totalItems === 0 ? (
-              'Nenhum registro'
-            ) : (
-              <>
-                Mostrando { (currentPage - 1) * pageSize + 1 } a { Math.min(currentPage * pageSize, totalItems) } de {totalItems} registro{totalItems !== 1 ? 's' : ''}
-              </>
-            )}
+      {pagination && (
+        <Card.Footer className="bg-white border-top p-3 d-flex flex-wrap justify-content-between align-items-center gap-3">
+          <div className="d-flex align-items-center gap-3">
+            <span className="small text-muted" aria-live="polite">
+              {totalItems === 0 ? (
+                '0 registros'
+              ) : (
+                <>
+                  Mostrando <strong>{(currentPage - 1) * pageSize + 1}</strong> a{' '}
+                  <strong>{Math.min(currentPage * pageSize, totalItems)}</strong> de{' '}
+                  <strong>{totalItems}</strong> registro{totalItems !== 1 ? 's' : ''}
+                </>
+              )}
+            </span>
+            <div className="d-flex align-items-center gap-1.5">
+              <span className="small text-muted">Exibir:</span>
+              <Form.Select
+                size="sm"
+                value={pageSize}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                style={{ width: 'auto', minWidth: '85px' }}
+                aria-label="Itens por página"
+              >
+                {pageSizes.map((size) => (
+                  <option key={size} value={size}>
+                    {size} / pág
+                  </option>
+                ))}
+              </Form.Select>
+            </div>
           </div>
-          <nav className="data-table__pagination" aria-label="Paginação da tabela">
-            <Pagination size="sm" className="mb-0">
-              <Pagination.Prev
-                disabled={currentPage === 1}
-                onClick={() => handlePageChange(currentPage - 1)}
-                aria-label="Página anterior"
-              >
-                <ChevronLeft size={16} aria-hidden="true" />
-              </Pagination.Prev>
-              {Array.from({ length: totalPages }, (_, i) => i + 1)
-                .filter((page) => {
-                  if (totalPages <= 7) return true;
-                  if (page === 1 || page === totalPages) return true;
-                  if (page >= currentPage - 1 && page <= currentPage + 1) return true;
-                  return false;
-                })
-                .map((page, index, array) => {
-                  const prevPage = array[index - 1];
-                  const showEllipsis = prevPage !== undefined && page - prevPage > 1;
-                  return (
-                    <Fragment key={page}>
-                      {showEllipsis && (
-                        <Pagination.Item key={`ellipsis-${page}`} disabled>
-                          <span className="page-link">…</span>
+
+          {totalPages > 1 && (
+            <nav className="data-table__pagination" aria-label="Paginação da tabela">
+              <Pagination size="sm" className="mb-0">
+                <Pagination.Prev
+                  disabled={currentPage === 1}
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  aria-label="Página anterior"
+                >
+                  <ChevronLeft size={16} aria-hidden="true" />
+                </Pagination.Prev>
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter((page) => {
+                    if (totalPages <= 7) return true;
+                    if (page === 1 || page === totalPages) return true;
+                    if (page >= currentPage - 1 && page <= currentPage + 1) return true;
+                    return false;
+                  })
+                  .map((page, index, array) => {
+                    const prevPage = array[index - 1];
+                    const showEllipsis = prevPage !== undefined && page - prevPage > 1;
+                    return (
+                      <Fragment key={page}>
+                        {showEllipsis && (
+                          <Pagination.Item key={`ellipsis-${page}`} disabled>
+                            <span className="page-link">…</span>
+                          </Pagination.Item>
+                        )}
+                        <Pagination.Item active={page === currentPage}>
+                          <button
+                            type="button"
+                            className="page-link"
+                            onClick={() => handlePageChange(page)}
+                            aria-label={`Página ${page}`}
+                            aria-current={page === currentPage ? 'page' : undefined}
+                          >
+                            {page}
+                          </button>
                         </Pagination.Item>
-                      )}
-                      <Pagination.Item active={page === currentPage}>
-                        <button
-                          type="button"
-                          className="page-link"
-                          onClick={() => handlePageChange(page)}
-                          aria-label={`Página ${page}`}
-                          aria-current={page === currentPage ? 'page' : undefined}
-                        >
-                          {page}
-                        </button>
-                      </Pagination.Item>
-                    </Fragment>
-                  );
-                })}
-              <Pagination.Next
-                disabled={currentPage === totalPages}
-                onClick={() => handlePageChange(currentPage + 1)}
-                aria-label="Próxima página"
-              >
-                <ChevronRight size={16} aria-hidden="true" />
-              </Pagination.Next>
-            </Pagination>
-          </nav>
-        </div>
+                      </Fragment>
+                    );
+                  })}
+                <Pagination.Next
+                  disabled={currentPage === totalPages}
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  aria-label="Próxima página"
+                >
+                  <ChevronRight size={16} aria-hidden="true" />
+                </Pagination.Next>
+              </Pagination>
+            </nav>
+          )}
+        </Card.Footer>
       )}
-    </div>
+    </Card>
   );
 }
 

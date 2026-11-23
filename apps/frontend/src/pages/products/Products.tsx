@@ -279,8 +279,8 @@ export function Products() {
         </Alert>
       )}
 
-      <Card className="mb-4">
-        <Card.Body>
+      <Card className="shadow-sm border-0 rounded-3 mb-4">
+        <Card.Body className="p-3">
           <Form className="row g-3 align-items-end">
             <div className="col-md-4">
               <Form.Label>Buscar</Form.Label>

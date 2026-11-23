@@ -45,14 +45,9 @@ export class AuthController {
   }
 
   @Post('register')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Criar novo usuário (apenas admin)' })
+  @ApiOperation({ summary: 'Cadastrar novo usuário' })
   @ApiResponse({ status: 201, description: 'Usuário criado com sucesso', type: AuthResponseDto })
   @ApiResponse({ status: 400, description: 'Dados inválidos ou senha fraca' })
-  @ApiResponse({ status: 401, description: 'Não autenticado' })
-  @ApiResponse({ status: 403, description: 'Acesso negado' })
   @ApiResponse({ status: 409, description: 'Usuário ou email já existe' })
   async register(@Body() registerDto: RegisterDto): Promise<AuthResponseDto> {
     return this.authService.register(registerDto);

@@ -55,7 +55,7 @@ export function Register() {
         nome: formData.nome.trim(),
         email: formData.email.trim().toLowerCase(),
         senha: formData.senha,
-        nivel: UserRole.OPERATOR,
+        nivel: UserRole.USER,
       });
       success('Conta criada!', 'Bem-vindo ao Sistema de Estoque');
       navigate('/dashboard', { replace: true });

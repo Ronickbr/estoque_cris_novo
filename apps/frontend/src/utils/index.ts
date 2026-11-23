@@ -188,6 +188,7 @@ export function getMovementTypeColor(type: string): string {
 export function getUserRoleLabel(role: string): string {
   const labels: Record<string, string> = {
     admin: 'Administrador',
+    usuario: 'Usuário',
     operator: 'Operador',
     viewer: 'Visualizador',
   };
@@ -197,6 +198,7 @@ export function getUserRoleLabel(role: string): string {
 export function getUserRoleColor(role: string): string {
   const colors: Record<string, string> = {
     admin: 'danger',
+    usuario: 'primary',
     operator: 'primary',
     viewer: 'secondary',
   };

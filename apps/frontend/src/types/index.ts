@@ -9,7 +9,8 @@ export interface User {
 
 export enum UserRole {
   ADMIN = 'admin',
-  OPERATOR = 'operator',
+  USER = 'usuario',
+  OPERATOR = 'usuario',
   VIEWER = 'viewer',
 }
 
